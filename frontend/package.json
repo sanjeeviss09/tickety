@@ -66,5 +66,11 @@
     "typescript": "~6.0.2",
     "vite": "^5.4.11",
     "vitest": "^2.1.9"
+  },
+  "overrides": {
+    "react-quill": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    }
   }
 }

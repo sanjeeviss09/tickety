@@ -18,6 +18,7 @@ import {
   useTechnicianStatusOverview,
   useTechnicianPriorityOverview,
   useAwaitingConfirmationTickets,
+  useAcceptTicket,
 } from './hooks/useTechnicianDashboard';
 
 import {
@@ -325,12 +326,12 @@ function ActiveTicketTable() {
                         <p className="line-clamp-1 text-xs font-medium">{ticket.subject}</p>
                       </td>
                       <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
-                        {ticket.creator?.full_name ?? '—'}
+                        {((ticket.creator as any)?.full_name ?? (ticket.creator as any)?.[0]?.full_name) ?? '—'}
                       </td>
                       <td className="px-3 py-2.5"><PriorityDot priority={ticket.priority} /></td>
                       <td className="px-3 py-2.5"><StatusBadge status={ticket.status} /></td>
                       <td className="px-3 py-2.5"><SlaIndicator dueDate={ticket.due_date} status={ticket.status} /></td>
-                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{ticket.ticket_categories?.name ?? '—'}</td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{((ticket.ticket_categories as any)?.name ?? (ticket.ticket_categories as any)?.[0]?.name) ?? '—'}</td>
                       <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
                         {new Date(ticket.updated_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                       </td>
@@ -393,6 +394,7 @@ export function TechnicianDashboard() {
 
   // Mutations
   const markRead = useMarkNotificationRead();
+  const acceptTicket = useAcceptTicket();
 
   const summary = dashData?.summary;
   const performance = dashData?.performance;
@@ -727,9 +729,9 @@ export function TechnicianDashboard() {
                         <PriorityDot priority={ticket.priority} />
                       </div>
                       <p className="text-sm font-medium line-clamp-1">{ticket.subject}</p>
-                      {ticket.creator?.full_name && (
+                      {((ticket.creator as any)?.full_name ?? (ticket.creator as any)?.[0]?.full_name) && (
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          {ticket.creator.full_name}
+                          {(ticket.creator as any)?.full_name ?? (ticket.creator as any)?.[0]?.full_name}
                           {waitingSince && <span className="ml-2 text-yellow-700 font-medium">waiting {waitingSince}h</span>}
                         </p>
                       )}
@@ -738,6 +740,8 @@ export function TechnicianDashboard() {
                       <Link to={`/tickets/${ticket.id}`}>View Ticket</Link>
                     </Button>
                   </div>
+                );
+              })}
             </div>
           )}
         </CardContent>
@@ -765,8 +769,8 @@ export function TechnicianDashboard() {
           ) : (
             <div className="space-y-2 mt-4">
               {(awaitingConfirmations ?? []).map(ticket => {
-                const waitingSince = ticket.technician_completed_at
-                  ? Math.ceil((Date.now() - new Date(ticket.technician_completed_at).getTime()) / 3_600_000)
+                const waitingSince = (ticket as any).technician_completed_at
+                  ? Math.ceil((Date.now() - new Date((ticket as any).technician_completed_at).getTime()) / 3_600_000)
                   : null;
                 return (
                   <div key={ticket.id} className="flex items-start gap-3 p-3 border rounded-lg border-orange-100 bg-orange-50/30 hover:bg-orange-50/70 transition-colors">
@@ -776,9 +780,9 @@ export function TechnicianDashboard() {
                         <PriorityDot priority={ticket.priority} />
                       </div>
                       <p className="text-sm font-medium line-clamp-1">{ticket.subject}</p>
-                      {ticket.creator?.full_name && (
+                      {((ticket.creator as any)?.full_name ?? (ticket.creator as any)?.[0]?.full_name) && (
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          {ticket.creator.full_name}
+                          {(ticket.creator as any)?.full_name ?? (ticket.creator as any)?.[0]?.full_name}
                           {waitingSince && <span className="ml-2 text-orange-700 font-medium">waiting {waitingSince}h</span>}
                         </p>
                       )}
@@ -833,7 +837,7 @@ export function TechnicianDashboard() {
                         </Link>
                       </td>
                       <td className="px-3 py-2 text-xs line-clamp-1 max-w-48">{ticket.subject}</td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground">{ticket.creator?.full_name ?? '—'}</td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{((ticket.creator as any)?.full_name ?? (ticket.creator as any)?.[0]?.full_name) ?? '—'}</td>
                       <td className="px-3 py-2"><StatusBadge status={ticket.status} /></td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">
                         {ticket.resolution_date
@@ -1046,7 +1050,7 @@ export function TechnicianDashboard() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-mono text-muted-foreground">{asset.asset_code}</span>
-                        <span className="text-xs text-muted-foreground">{asset.asset_categories?.name}</span>
+                        <span className="text-xs text-muted-foreground">{((asset.asset_categories as any)?.name ?? (asset.asset_categories as any)?.[0]?.name) ?? '—'}</span>
                       </div>
                       <p className="text-sm font-medium line-clamp-1">{asset.name}</p>
                       {asset.linkedTicket && (

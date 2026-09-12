@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useKnowledgeStore } from '../../../store/knowledgeStore';
 import { Button } from '@/components/ui/button';
@@ -99,7 +99,7 @@ export function ArticleView() {
         </div>
       </div>
 
-      {currentArticle.allow_comments && (
+      {(currentArticle as any).allow_comments && (
         <div className="border-t pt-8 mt-12 space-y-6">
           <h3 className="text-xl font-bold flex items-center gap-2"><MessageSquare className="h-5 w-5" /> Comments ({comments.length})</h3>
           <div className="space-y-4">

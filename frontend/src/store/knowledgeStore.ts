@@ -45,7 +45,7 @@ interface KnowledgeState {
   deleteSop: (id: string) => Promise<void>;
 }
 
-export const useKnowledgeStore = create<KnowledgeState>((set) => ({
+export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
   articles: [],
   currentArticle: null,
   categories: [],

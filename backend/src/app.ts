@@ -26,7 +26,19 @@ const app: Express = express();
 // Security middlewares
 app.use(helmet());
 app.use(cors({
-  origin: env.CORS_ORIGIN,
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    const configuredOrigins = env.CORS_ORIGIN.split(',').map(o => o.trim());
+    if (
+      configuredOrigins.includes('*') ||
+      configuredOrigins.includes(origin) ||
+      origin.endsWith('.vercel.app') ||
+      origin.includes('localhost')
+    ) {
+      return callback(null, true);
+    }
+    return callback(null, true);
+  },
   credentials: true,
 }));
 

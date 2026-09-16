@@ -53,8 +53,8 @@ if (env.NODE_ENV === 'development') {
   app.use(morgan('combined'));
 }
 
-// Health check route
-app.get('/api/v1/health', (req: Request, res: Response) => {
+// Health check routes
+app.get(['/api/v1/health', '/api/health', '/health', '/'], (req: Request, res: Response) => {
   res.status(200).json({
     status: 'success',
     message: 'DeskPulse API is running',
@@ -63,23 +63,30 @@ app.get('/api/v1/health', (req: Request, res: Response) => {
   });
 });
 
-// API Routes
-app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/users', usersRoutes);
-app.use('/api/v1/units', unitsRoutes);
-app.use('/api/v1/departments', departmentsRoutes);
-app.use('/api/v1/tickets', ticketRoutes);
-app.use('/api/v1/categories', categoryRoutes);
-app.use('/api/v1/notifications', notificationRoutes);
-app.use('/api/v1/assets', assetRoutes);
-app.use('/api/v1/analytics', analyticsRoutes);
-app.use('/api/v1/reports', reportsRoutes);
-app.use('/api/v1/knowledge', knowledgeRoutes);
-app.use('/api/v1/services', servicesRoutes);
-app.use('/api/v1/employees', employeesRoutes);
-app.use('/api/v1/settings', settingsRoutes);
-app.use('/api/v1/public', publicRoutes);
-app.use('/api/v1/routing', routingRoutes);
+// Helper to register routes across multiple prefixes (/api/v1, /api, and root /)
+const registerRoutes = (prefix: string) => {
+  app.use(`${prefix}/auth`, authRoutes);
+  app.use(`${prefix}/users`, usersRoutes);
+  app.use(`${prefix}/units`, unitsRoutes);
+  app.use(`${prefix}/departments`, departmentsRoutes);
+  app.use(`${prefix}/tickets`, ticketRoutes);
+  app.use(`${prefix}/categories`, categoryRoutes);
+  app.use(`${prefix}/notifications`, notificationRoutes);
+  app.use(`${prefix}/assets`, assetRoutes);
+  app.use(`${prefix}/analytics`, analyticsRoutes);
+  app.use(`${prefix}/reports`, reportsRoutes);
+  app.use(`${prefix}/knowledge`, knowledgeRoutes);
+  app.use(`${prefix}/services`, servicesRoutes);
+  app.use(`${prefix}/employees`, employeesRoutes);
+  app.use(`${prefix}/settings`, settingsRoutes);
+  app.use(`${prefix}/public`, publicRoutes);
+  app.use(`${prefix}/routing`, routingRoutes);
+};
+
+// Mount API routes
+registerRoutes('/api/v1');
+registerRoutes('/api');
+registerRoutes('');
 
 // 404 handler
 app.use((req: Request, res: Response, next: NextFunction) => {

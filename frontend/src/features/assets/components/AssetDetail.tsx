@@ -1,13 +1,24 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAssetStore } from '../../../store/assetStore';
 import { useAuthStore } from '../../../store/authStore';
+import api from '../../../lib/api';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, Edit, ShieldAlert, Paperclip, FileText } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { ArrowLeft, Edit, ShieldAlert, Paperclip, FileText, ShieldCheck, Loader2 } from 'lucide-react';
 import { AssignAssetDialog } from './AssignAssetDialog';
 
 export function AssetDetail() {
@@ -16,11 +27,73 @@ export function AssetDetail() {
   const { currentAsset, loading, fetchAssetById } = useAssetStore();
   const { profile } = useAuthStore();
 
+  const [warrantyModalOpen, setWarrantyModalOpen] = useState(false);
+  const [savingWarranty, setSavingWarranty] = useState(false);
+  const [warrantyForm, setWarrantyForm] = useState({
+    warranty_start_date: '',
+    warranty_end_date: '',
+    amc_start_date: '',
+    amc_end_date: '',
+    provider: '',
+    contact_info: ''
+  });
+
   useEffect(() => {
     if (id) {
       fetchAssetById(id);
     }
   }, [id]);
+
+  useEffect(() => {
+    if (currentAsset?.warranty) {
+      setWarrantyForm({
+        warranty_start_date: currentAsset.warranty.warranty_start_date || currentAsset.purchase_date || '',
+        warranty_end_date: currentAsset.warranty.warranty_end_date || '',
+        amc_start_date: currentAsset.warranty.amc_start_date || '',
+        amc_end_date: currentAsset.warranty.amc_end_date || '',
+        provider: currentAsset.warranty.provider || currentAsset.vendor || '',
+        contact_info: currentAsset.warranty.contact_info || ''
+      });
+    } else if (currentAsset) {
+      setWarrantyForm({
+        warranty_start_date: currentAsset.purchase_date || '',
+        warranty_end_date: '',
+        amc_start_date: '',
+        amc_end_date: '',
+        provider: currentAsset.vendor || '',
+        contact_info: ''
+      });
+    }
+  }, [currentAsset]);
+
+  const handleQuickDuration = (years: number) => {
+    const startStr = warrantyForm.warranty_start_date || currentAsset?.purchase_date || new Date().toISOString().split('T')[0];
+    const startDate = new Date(startStr);
+    if (!isNaN(startDate.getTime())) {
+      const endDate = new Date(startDate);
+      endDate.setFullYear(endDate.getFullYear() + years);
+      setWarrantyForm(prev => ({
+        ...prev,
+        warranty_start_date: startStr,
+        warranty_end_date: endDate.toISOString().split('T')[0]
+      }));
+    }
+  };
+
+  const handleSaveWarranty = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id) return;
+    setSavingWarranty(true);
+    try {
+      await api.put(`/assets/${id}/warranty`, warrantyForm);
+      await fetchAssetById(id);
+      setWarrantyModalOpen(false);
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Failed to save warranty details');
+    } finally {
+      setSavingWarranty(false);
+    }
+  };
 
   if (loading || !currentAsset) {
     return <div className="p-8 text-center text-muted-foreground">Loading asset details...</div>;
@@ -164,39 +237,81 @@ export function AssetDetail() {
 
         <TabsContent value="warranty" className="mt-4">
           <Card>
-            <CardHeader>
-              <CardTitle>Warranty & AMC Information</CardTitle>
+            <CardHeader className="flex flex-row items-center justify-between pb-4">
+              <div>
+                <CardTitle>Warranty & AMC Information</CardTitle>
+                <CardDescription>Track equipment warranty duration, AMC dates, and service contact details</CardDescription>
+              </div>
+              {profile?.roles?.name !== 'Employee' && (
+                <Button size="sm" onClick={() => setWarrantyModalOpen(true)}>
+                  <ShieldCheck className="mr-1.5 h-4 w-4" />
+                  {asset.warranty ? 'Edit Warranty Details' : 'Add Warranty Details'}
+                </Button>
+              )}
             </CardHeader>
             <CardContent>
               {asset.warranty ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="p-4 border rounded-lg">
-                    <h3 className="font-semibold mb-2">Warranty</h3>
-                    <p className="text-sm"><span className="text-muted-foreground">Start:</span> {new Date(asset.warranty.warranty_start_date).toLocaleDateString()}</p>
-                    <p className="text-sm"><span className="text-muted-foreground">End:</span> {new Date(asset.warranty.warranty_end_date).toLocaleDateString()}</p>
+                  <div className="p-4 border rounded-lg bg-card">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="font-semibold text-sm">Warranty Period</h3>
+                      {(() => {
+                        if (!asset.warranty.warranty_end_date) return null;
+                        const end = new Date(asset.warranty.warranty_end_date);
+                        const isExpired = end < new Date();
+                        const daysLeft = Math.ceil((end.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                        return (
+                          <Badge variant={isExpired ? 'destructive' : daysLeft <= 30 ? 'outline' : 'default'} className="text-xs">
+                            {isExpired ? 'Expired' : daysLeft <= 30 ? `Expiring in ${daysLeft} days` : 'Active'}
+                          </Badge>
+                        );
+                      })()}
+                    </div>
+                    <div className="space-y-1.5 text-sm">
+                      <p><span className="text-muted-foreground">Start:</span> {asset.warranty.warranty_start_date ? new Date(asset.warranty.warranty_start_date).toLocaleDateString() : 'N/A'}</p>
+                      <p><span className="text-muted-foreground">End:</span> {asset.warranty.warranty_end_date ? new Date(asset.warranty.warranty_end_date).toLocaleDateString() : 'N/A'}</p>
+                    </div>
                   </div>
-                  <div className="p-4 border rounded-lg">
-                    <h3 className="font-semibold mb-2">AMC (Annual Maintenance Contract)</h3>
-                    {asset.warranty.amc_start_date ? (
-                      <>
-                        <p className="text-sm"><span className="text-muted-foreground">Start:</span> {new Date(asset.warranty.amc_start_date).toLocaleDateString()}</p>
-                        <p className="text-sm"><span className="text-muted-foreground">End:</span> {new Date(asset.warranty.amc_end_date).toLocaleDateString()}</p>
-                      </>
+
+                  <div className="p-4 border rounded-lg bg-card">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="font-semibold text-sm">AMC (Annual Maintenance Contract)</h3>
+                      {(() => {
+                        if (!asset.warranty.amc_end_date) return null;
+                        const end = new Date(asset.warranty.amc_end_date);
+                        const isExpired = end < new Date();
+                        return (
+                          <Badge variant={isExpired ? 'destructive' : 'secondary'} className="text-xs">
+                            {isExpired ? 'AMC Expired' : 'AMC Active'}
+                          </Badge>
+                        );
+                      })()}
+                    </div>
+                    {asset.warranty.amc_start_date || asset.warranty.amc_end_date ? (
+                      <div className="space-y-1.5 text-sm">
+                        <p><span className="text-muted-foreground">Start:</span> {asset.warranty.amc_start_date ? new Date(asset.warranty.amc_start_date).toLocaleDateString() : 'N/A'}</p>
+                        <p><span className="text-muted-foreground">End:</span> {asset.warranty.amc_end_date ? new Date(asset.warranty.amc_end_date).toLocaleDateString() : 'N/A'}</p>
+                      </div>
                     ) : (
-                      <p className="text-sm text-muted-foreground">No AMC recorded.</p>
+                      <p className="text-sm text-muted-foreground">No AMC recorded for this asset.</p>
                     )}
                   </div>
-                  <div className="col-span-1 md:col-span-2 p-4 border rounded-lg">
-                    <h3 className="font-semibold mb-2">Provider Details</h3>
-                    <p className="text-sm"><span className="text-muted-foreground">Name:</span> {asset.warranty.provider || 'N/A'}</p>
-                    <p className="text-sm"><span className="text-muted-foreground">Contact:</span> {asset.warranty.contact_info || 'N/A'}</p>
+
+                  <div className="col-span-1 md:col-span-2 p-4 border rounded-lg bg-card">
+                    <h3 className="font-semibold text-sm mb-2">Provider & Support Contact</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                      <p><span className="text-muted-foreground">Provider:</span> {asset.warranty.provider || 'N/A'}</p>
+                      <p><span className="text-muted-foreground">Contact:</span> {asset.warranty.contact_info || 'N/A'}</p>
+                    </div>
                   </div>
                 </div>
               ) : (
                 <div className="text-center py-8">
                   <p className="text-muted-foreground mb-4">No warranty information recorded for this asset.</p>
                   {profile?.roles?.name !== 'Employee' && (
-                    <Button variant="outline">Add Warranty Details</Button>
+                    <Button variant="outline" onClick={() => setWarrantyModalOpen(true)}>
+                      <ShieldCheck className="mr-2 h-4 w-4" /> Add Warranty Details
+                    </Button>
                   )}
                 </div>
               )}
@@ -276,6 +391,120 @@ export function AssetDetail() {
         </TabsContent>
 
       </Tabs>
+
+      {/* Warranty & AMC Edit Dialog */}
+      <Dialog open={warrantyModalOpen} onOpenChange={setWarrantyModalOpen}>
+        <DialogContent className="sm:max-w-[550px]">
+          <form onSubmit={handleSaveWarranty}>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5 text-primary" />
+                {asset.warranty ? 'Edit Warranty & AMC Details' : 'Add Warranty & AMC Details'}
+              </DialogTitle>
+              <DialogDescription>
+                Track warranty periods, AMC dates, and provider contacts for {asset.name} ({asset.asset_code}).
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="grid gap-4 py-4 text-sm">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="w_start">Warranty Start Date</Label>
+                  <Input
+                    id="w_start"
+                    type="date"
+                    value={warrantyForm.warranty_start_date}
+                    onChange={(e) => setWarrantyForm(f => ({ ...f, warranty_start_date: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="w_end">Warranty End Date</Label>
+                  <Input
+                    id="w_end"
+                    type="date"
+                    value={warrantyForm.warranty_end_date}
+                    onChange={(e) => setWarrantyForm(f => ({ ...f, warranty_end_date: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {/* Quick duration presets */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Quick Duration:</span>
+                {[1, 2, 3, 5].map(yrs => (
+                  <Button
+                    key={yrs}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2.5 text-xs"
+                    onClick={() => handleQuickDuration(yrs)}
+                  >
+                    +{yrs} {yrs === 1 ? 'Year' : 'Years'}
+                  </Button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2 border-t">
+                <div className="space-y-1.5">
+                  <Label htmlFor="amc_start">AMC Start Date</Label>
+                  <Input
+                    id="amc_start"
+                    type="date"
+                    value={warrantyForm.amc_start_date}
+                    onChange={(e) => setWarrantyForm(f => ({ ...f, amc_start_date: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="amc_end">AMC End Date</Label>
+                  <Input
+                    id="amc_end"
+                    type="date"
+                    value={warrantyForm.amc_end_date}
+                    onChange={(e) => setWarrantyForm(f => ({ ...f, amc_end_date: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t">
+                <div className="space-y-1.5">
+                  <Label htmlFor="provider">Provider / Vendor</Label>
+                  <Input
+                    id="provider"
+                    placeholder="e.g. ASUS Support, Dell Inc."
+                    value={warrantyForm.provider}
+                    onChange={(e) => setWarrantyForm(f => ({ ...f, provider: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="contact">Support Contact</Label>
+                  <Input
+                    id="contact"
+                    placeholder="e.g. support@asus.com, 1800-XXX-XXXX"
+                    value={warrantyForm.contact_info}
+                    onChange={(e) => setWarrantyForm(f => ({ ...f, contact_info: e.target.value }))}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button type="button" variant="outline" onClick={() => setWarrantyModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={savingWarranty}>
+                {savingWarranty ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...
+                  </>
+                ) : (
+                  'Save Warranty Details'
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

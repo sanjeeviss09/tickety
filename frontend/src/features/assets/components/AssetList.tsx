@@ -259,22 +259,33 @@ export function AssetList() {
                         <div className="text-xs text-muted-foreground">
                           {asset.brand} {asset.model} • SN: {asset.serial_number || 'N/A'}
                         </div>
-                        <div className="text-xs text-muted-foreground">{asset.category?.name || 'Uncategorized'}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {asset.category?.name || asset.asset_categories?.name || 'Uncategorized'}
+                        </div>
                       </TableCell>
                       <TableCell>
                         {asset.assigned_employee ? (
                           <div className="flex flex-col">
                             <span className="text-sm font-medium">{asset.assigned_employee.full_name}</span>
-                            <span className="text-xs text-muted-foreground">{asset.assigned_employee.employee_id}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {asset.assigned_employee.employee_id}
+                              {asset.status === 'Available' ? ' (Unit Custody)' : ''}
+                            </span>
                           </div>
                         ) : (
                           <span className="text-muted-foreground italic text-sm">Unassigned</span>
                         )}
                       </TableCell>
                       <TableCell>
-                        <div className="text-sm">{asset.department?.name || '-'}</div>
-                        <div className="text-xs text-muted-foreground">{asset.unit?.name || '-'}</div>
-                        <div className="text-xs text-muted-foreground">{asset.location || ''}</div>
+                        <div className="text-sm font-medium">
+                          {typeof asset.department === 'object' ? asset.department?.name : (asset.department || '-')}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {typeof asset.unit === 'object' ? asset.unit?.name : (asset.unit || '-')}
+                        </div>
+                        {asset.location && (
+                          <div className="text-xs text-muted-foreground">{asset.location}</div>
+                        )}
                       </TableCell>
                       <TableCell>
                         <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(asset.status)}`}>

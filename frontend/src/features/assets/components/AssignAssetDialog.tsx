@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../../../lib/api';
+import { useAssetStore } from '../../../store/assetStore';
 
 import {
   Dialog,
@@ -59,6 +60,9 @@ export function AssignAssetDialog({ asset, onAssignmentComplete }: { asset: any,
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['asset', asset.id] });
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
+      useAssetStore.getState().fetchAssetById(asset.id);
+      useAssetStore.getState().fetchAssets();
       setOpen(false);
       form.reset();
       if (onAssignmentComplete) onAssignmentComplete();

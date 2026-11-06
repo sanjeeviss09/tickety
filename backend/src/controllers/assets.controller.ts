@@ -20,8 +20,60 @@ const createAssetSchema = z.object({
   notes: z.string().optional(),
   assigned_to: z.string().uuid().optional(),
   warranty: z.string().optional(),
+  warranty_start_date: z.string().optional().nullable(),
+  warranty_end_date: z.string().optional().nullable(),
+  amc_start_date: z.string().optional().nullable(),
+  amc_end_date: z.string().optional().nullable(),
+  warranty_provider: z.string().optional().nullable(),
+  warranty_contact_info: z.string().optional().nullable(),
   port_number: z.string().optional(),
 });
+
+export function parseWarrantyDates(warrantyStr?: string | null, purchaseDateStr?: string | null) {
+  if (!warrantyStr) return null;
+  const startDate = purchaseDateStr ? new Date(purchaseDateStr) : new Date();
+  if (isNaN(startDate.getTime())) return null;
+
+  const trimmed = warrantyStr.trim().toLowerCase();
+  
+  // Try direct date string
+  const directDate = new Date(warrantyStr);
+  if (!isNaN(directDate.getTime()) && directDate.getFullYear() > 2000 && /\d{4}/.test(warrantyStr)) {
+    return {
+      warranty_start_date: startDate.toISOString().split('T')[0],
+      warranty_end_date: directDate.toISOString().split('T')[0]
+    };
+  }
+
+  // Match years (e.g. "5years", "5 years", "3 yr", "1 year")
+  const matchYears = trimmed.match(/^(\d+)\s*(?:year|yr|y)s?$/);
+  if (matchYears) {
+    const years = parseInt(matchYears[1], 10);
+    const endDate = new Date(startDate);
+    endDate.setFullYear(endDate.getFullYear() + years);
+    return {
+      warranty_start_date: startDate.toISOString().split('T')[0],
+      warranty_end_date: endDate.toISOString().split('T')[0]
+    };
+  }
+
+  // Match months (e.g. "24 months", "6 mo")
+  const matchMonths = trimmed.match(/^(\d+)\s*(?:month|mo|m)s?$/);
+  if (matchMonths) {
+    const months = parseInt(matchMonths[1], 10);
+    const endDate = new Date(startDate);
+    endDate.setMonth(endDate.getMonth() + months);
+    return {
+      warranty_start_date: startDate.toISOString().split('T')[0],
+      warranty_end_date: endDate.toISOString().split('T')[0]
+    };
+  }
+
+  return {
+    warranty_start_date: startDate.toISOString().split('T')[0],
+    warranty_end_date: null
+  };
+}
 
 export const getCategories = async (req: Request, res: Response) => {
   try {
@@ -44,41 +96,94 @@ export const createAsset = async (req: Request, res: Response) => {
     }
 
     const validatedData = createAssetSchema.parse(req.body);
-    const { assigned_to, ...assetData } = validatedData;
+    const { 
+      assigned_to, 
+      warranty_start_date, 
+      warranty_end_date, 
+      amc_start_date, 
+      amc_end_date, 
+      warranty_provider, 
+      warranty_contact_info, 
+      ...assetData 
+    } = validatedData;
 
-    let finalAssignee = assigned_to;
+    // Fetch the raising user's profile
+    const { data: creatorProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('id, full_name, employee_id, role:roles(name), unit:units(name), department:departments(name), location')
+      .eq('id', userId)
+      .single();
 
-    // If not assigned to an employee but it has a unit, automatically assign to a unit technician
-    if (!finalAssignee && assetData.unit) {
-      // Find a technician in this unit
-      // First, try to see if the creator is a technician in this unit
-      const { data: creatorProfile } = await supabaseAdmin
+    let finalAssignee = assigned_to || null;
+    let assignmentRemarks = 'Assigned during creation';
+
+    // 1. If assigned to an employee:
+    // Location, business unit, and department will be the same as the assigned employee
+    if (finalAssignee) {
+      const { data: empProfile } = await supabaseAdmin
         .from('profiles')
-        .select('id, unit:units!inner(name), role:roles!inner(name)')
-        .eq('id', userId)
+        .select('id, full_name, employee_id, unit:units(name), department:departments(name), location')
+        .eq('id', finalAssignee)
         .single();
-      
-      const roleObj: any = creatorProfile?.role;
-      const unitObj: any = creatorProfile?.unit;
-      if (creatorProfile && roleObj?.name === 'Technician' && unitObj?.name === assetData.unit) {
-        finalAssignee = userId;
+
+      if (empProfile) {
+        const empUnit: any = (empProfile as any).unit;
+        const empDept: any = (empProfile as any).department;
+        const unitName = Array.isArray(empUnit) ? empUnit[0]?.name : empUnit?.name;
+        const deptName = Array.isArray(empDept) ? empDept[0]?.name : empDept?.name;
+        if (unitName) assetData.unit = unitName;
+        if (deptName) assetData.department = deptName;
+        if (empProfile.location) assetData.location = empProfile.location;
+      }
+      assetData.status = 'Assigned';
+    } else {
+      // 2. If status is Available or unassigned:
+      // Location/business unit defaults to the creator's unit and it will be automatically assigned to the Unit Technician who is raising
+      const cUnit: any = (creatorProfile as any)?.unit;
+      const cDept: any = (creatorProfile as any)?.department;
+      const cUnitName = Array.isArray(cUnit) ? cUnit[0]?.name : cUnit?.name;
+      const cDeptName = Array.isArray(cDept) ? cDept[0]?.name : cDept?.name;
+
+      if (!assetData.unit && cUnitName) {
+        assetData.unit = cUnitName;
+      }
+      if (!assetData.department && cDeptName) {
+        assetData.department = cDeptName;
+      }
+      if (!assetData.location && creatorProfile?.location) {
+        assetData.location = creatorProfile.location;
+      }
+
+      const creatorRole: any = (creatorProfile as any)?.role;
+      const creatorRoleName = Array.isArray(creatorRole) ? creatorRole[0]?.name : creatorRole?.name;
+      if (creatorRoleName === 'Technician' && creatorProfile) {
+        finalAssignee = creatorProfile.id;
+        assignmentRemarks = 'Auto-assigned to Unit Technician who raised the asset (Available)';
       } else {
-        // Find first available technician in this unit
-        const { data: techs } = await supabaseAdmin
-          .from('profiles')
-          .select('id, role:roles!inner(name), unit:units!inner(name)')
-          .eq('roles.name', 'Technician')
-          .eq('units.name', assetData.unit)
-          .limit(1);
-          
-        if (techs && techs.length > 0) {
-          finalAssignee = techs[0].id;
+        // If creator is Admin, check if there's a technician in this unit
+        if (assetData.unit) {
+          const { data: unitTech } = await supabaseAdmin
+            .from('profiles')
+            .select('id, role:roles!inner(name), unit:units!inner(name)')
+            .eq('roles.name', 'Technician')
+            .ilike('units.name', assetData.unit)
+            .limit(1)
+            .maybeSingle();
+            
+          if (unitTech) {
+            finalAssignee = unitTech.id;
+            assignmentRemarks = 'Auto-assigned to Unit Technician (Available)';
+          }
+        }
+        if (!finalAssignee) {
+          finalAssignee = creatorProfile?.id || userId;
+          assignmentRemarks = 'Auto-assigned to creator (Available)';
         }
       }
-    }
 
-    if (finalAssignee) {
-      assetData.status = 'Assigned';
+      if (!assetData.status) {
+        assetData.status = 'Available';
+      }
     }
 
     const { data: asset, error } = await supabaseAdmin
@@ -92,14 +197,44 @@ export const createAsset = async (req: Request, res: Response) => {
 
     if (error) throw error;
 
+    // Create assignment if finalAssignee is present
     if (finalAssignee) {
       await supabaseAdmin.from('asset_assignments').insert([{
         asset_id: asset.id,
         assigned_to: finalAssignee,
         assigned_by: userId,
         status: 'Active',
-        remarks: assigned_to ? 'Assigned during creation' : 'Auto-assigned to unit technician'
+        remarks: assignmentRemarks
       }]);
+    }
+
+    // Warranty & AMC Tracking
+    let finalWarrantyStart = warranty_start_date || assetData.purchase_date || null;
+    let finalWarrantyEnd = warranty_end_date || null;
+
+    if (!finalWarrantyEnd && assetData.warranty) {
+      const parsed = parseWarrantyDates(assetData.warranty, finalWarrantyStart);
+      if (parsed?.warranty_end_date) {
+        finalWarrantyEnd = parsed.warranty_end_date;
+      }
+      if (!finalWarrantyStart && parsed?.warranty_start_date) {
+        finalWarrantyStart = parsed.warranty_start_date;
+      }
+    }
+
+    const finalProvider = warranty_provider || assetData.vendor || null;
+    const finalContact = warranty_contact_info || null;
+
+    if (finalWarrantyStart || finalWarrantyEnd || amc_start_date || amc_end_date || finalProvider || finalContact) {
+      await supabaseAdmin.from('asset_warranty').upsert({
+        asset_id: asset.id,
+        warranty_start_date: finalWarrantyStart,
+        warranty_end_date: finalWarrantyEnd,
+        amc_start_date: amc_start_date || null,
+        amc_end_date: amc_end_date || null,
+        provider: finalProvider,
+        contact_info: finalContact
+      }, { onConflict: 'asset_id' });
     }
 
     // Log history
@@ -126,8 +261,13 @@ export const getAssets = async (req: Request, res: Response) => {
       .from('assets')
       .select(`
         *,
-        asset_categories (name),
-        assignments:asset_assignments (assigned_to, is_default, assigned_user:profiles!asset_assignments_assigned_to_fkey(full_name))
+        category:asset_categories (id, name),
+        asset_categories (id, name),
+        warranty_details:asset_warranty (*),
+        assignments:asset_assignments (
+          id, assigned_to, is_default, status, assigned_at, remarks,
+          assigned_user:profiles!asset_assignments_assigned_to_fkey(id, full_name, employee_id, role:roles(name))
+        )
       `);
       
     // Apply role restrictions
@@ -149,13 +289,24 @@ export const getAssets = async (req: Request, res: Response) => {
     const { data, error } = await query;
     if (error) throw error;
     
-    // For Employee or when assigned_to filter is used, we need to filter out assets that were returned by inner join simulation since supabase deep filtering might return the parent row with empty assignments.
+    // For Employee or when assigned_to filter is used, filter out simulated empty joins
     let filteredData = Array.isArray(data) ? data : [];
     if (role === 'Employee') {
-      filteredData = filteredData.filter((a: any) => a.assignments && a.assignments.some((ass: any) => ass.assigned_to === userId));
+      filteredData = filteredData.filter((a: any) => a.assignments && a.assignments.some((ass: any) => ass.assigned_to === userId && ass.status === 'Active'));
     } else if (req.query.assigned_to) {
-      filteredData = filteredData.filter((a: any) => a.assignments && a.assignments.some((ass: any) => ass.assigned_to === req.query.assigned_to));
+      filteredData = filteredData.filter((a: any) => a.assignments && a.assignments.some((ass: any) => ass.assigned_to === req.query.assigned_to && ass.status === 'Active'));
     }
+
+    // Map properties for UI convenience
+    filteredData.forEach((a: any) => {
+      const activeAssignment = a.assignments?.find((ass: any) => ass.status === 'Active') || a.assignments?.[0];
+      a.assigned_employee = activeAssignment?.assigned_user || null;
+      a.category = a.category || a.asset_categories;
+      const wObj = Array.isArray(a.warranty_details) ? a.warranty_details[0] : (a.warranty_details || null);
+      if (wObj) {
+        a.warranty = wObj;
+      }
+    });
 
     res.json({ status: 'success', data: filteredData });
   } catch (error: any) {
@@ -174,9 +325,9 @@ export const getAssetById = async (req: Request, res: Response) => {
       .select(`
         *,
         category:asset_categories (name),
-        warranty:asset_warranty (*),
+        warranty_details:asset_warranty (*),
         maintenance:asset_maintenance (*),
-        assignments:asset_assignments (*, assigned_user:profiles!asset_assignments_assigned_to_fkey(full_name), assigned_by_user:profiles!asset_assignments_assigned_by_fkey(full_name)),
+        assignments:asset_assignments (*, assigned_user:profiles!asset_assignments_assigned_to_fkey(id, full_name, employee_id, role:roles(name)), assigned_by_user:profiles!asset_assignments_assigned_by_fkey(full_name)),
         documents:asset_documents (*, uploader:profiles(full_name)),
         history:asset_history (*, user:profiles!asset_history_performed_by_fkey(full_name), prev:profiles!asset_history_previous_owner_fkey(full_name), next:profiles!asset_history_new_owner_fkey(full_name))
       `)
@@ -192,6 +343,10 @@ export const getAssetById = async (req: Request, res: Response) => {
         return res.status(403).json({ status: 'error', message: 'Forbidden' });
       }
     }
+
+    // Normalize warranty object
+    const wRecord = Array.isArray(data.warranty_details) ? data.warranty_details[0] : (data.warranty_details || null);
+    data.warranty = wRecord || null;
 
     res.json({ status: 'success', data });
   } catch (error: any) {
@@ -248,6 +403,27 @@ export const assignAsset = async (req: Request, res: Response) => {
       .eq('asset_id', id)
       .eq('status', 'Active');
 
+    let updatePayload: any = { status: 'Assigned' };
+
+    // Fetch the assigned employee profile to synchronize unit, department, location
+    if (assigned_to) {
+      const { data: empProfile } = await supabaseAdmin
+        .from('profiles')
+        .select('id, full_name, unit:units(name), department:departments(name), location')
+        .eq('id', assigned_to)
+        .single();
+
+      if (empProfile) {
+        const empUnit: any = (empProfile as any).unit;
+        const empDept: any = (empProfile as any).department;
+        const unitName = Array.isArray(empUnit) ? empUnit[0]?.name : empUnit?.name;
+        const deptName = Array.isArray(empDept) ? empDept[0]?.name : empDept?.name;
+        if (unitName) updatePayload.unit = unitName;
+        if (deptName) updatePayload.department = deptName;
+        if (empProfile.location) updatePayload.location = empProfile.location;
+      }
+    }
+
     // Create new assignment
     const { data: assignment, error: assignmentError } = await supabaseAdmin
       .from('asset_assignments')
@@ -255,7 +431,7 @@ export const assignAsset = async (req: Request, res: Response) => {
         asset_id: id,
         assigned_to,
         assigned_by: userId,
-        remarks,
+        remarks: remarks || 'Asset assigned to employee',
         status: 'Active'
       }])
       .select()
@@ -263,10 +439,10 @@ export const assignAsset = async (req: Request, res: Response) => {
 
     if (assignmentError) throw assignmentError;
 
-    // Update asset status
+    // Update asset status and sync location/business unit
     await supabaseAdmin
       .from('assets')
-      .update({ status: 'Assigned' })
+      .update(updatePayload)
       .eq('id', id);
 
     // Record history
@@ -279,6 +455,53 @@ export const assignAsset = async (req: Request, res: Response) => {
     }]);
 
     res.json({ status: 'success', data: assignment });
+  } catch (error: any) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+};
+
+export const updateAssetWarranty = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = (req as any).user?.id;
+    const role = (req as any).user?.role;
+
+    if (role === 'Employee') return res.status(403).json({ status: 'error', message: 'Forbidden' });
+
+    const { 
+      warranty_start_date, 
+      warranty_end_date, 
+      amc_start_date, 
+      amc_end_date, 
+      provider, 
+      contact_info 
+    } = req.body;
+
+    const { data: warranty, error } = await supabaseAdmin
+      .from('asset_warranty')
+      .upsert({
+        asset_id: id,
+        warranty_start_date: warranty_start_date || null,
+        warranty_end_date: warranty_end_date || null,
+        amc_start_date: amc_start_date || null,
+        amc_end_date: amc_end_date || null,
+        provider: provider || null,
+        contact_info: contact_info || null
+      }, { onConflict: 'asset_id' })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // Record history
+    await supabaseAdmin.from('asset_history').insert([{
+      asset_id: id,
+      action: 'Updated',
+      performed_by: userId,
+      remarks: 'Warranty & AMC information updated'
+    }]);
+
+    res.json({ status: 'success', data: warranty });
   } catch (error: any) {
     res.status(500).json({ status: 'error', message: error.message });
   }
@@ -362,15 +585,46 @@ export const bulkImportAssets = async (req: Request, res: Response) => {
           throw insertError;
         }
 
-        // Create assignment record if assigned employee was provided
-        if (matchedEmp && insertedAsset) {
-          await supabaseAdmin.from('asset_assignments').insert([{
-            asset_id: insertedAsset.id,
-            assigned_to: matchedEmp.id,
-            assigned_by: (req as any).user?.id,
-            status: 'Active',
-            remarks: 'Assigned during bulk import'
-          }]);
+        // Create assignment record
+        if (insertedAsset) {
+          if (matchedEmp) {
+            await supabaseAdmin.from('asset_assignments').insert([{
+              asset_id: insertedAsset.id,
+              assigned_to: matchedEmp.id,
+              assigned_by: (req as any).user?.id,
+              status: 'Active',
+              remarks: 'Assigned during bulk import'
+            }]);
+          } else if (finalStatus === 'Available') {
+            await supabaseAdmin.from('asset_assignments').insert([{
+              asset_id: insertedAsset.id,
+              assigned_to: (req as any).user?.id,
+              assigned_by: (req as any).user?.id,
+              status: 'Active',
+              remarks: 'Auto-assigned to Unit Technician (Available)'
+            }]);
+          }
+
+          // Track warranty if provided in record
+          const wText = record.warranty || record.warranty_expiry_date || record.warranty_end_date;
+          if (wText || record.warranty_start_date) {
+            let wStart = record.warranty_start_date || record.purchase_date || null;
+            let wEnd = record.warranty_end_date || record.warranty_expiry_date || null;
+            if (!wEnd && wText) {
+              const parsed = parseWarrantyDates(String(wText), wStart);
+              if (parsed?.warranty_end_date) wEnd = parsed.warranty_end_date;
+              if (!wStart && parsed?.warranty_start_date) wStart = parsed.warranty_start_date;
+            }
+            if (wStart || wEnd) {
+              await supabaseAdmin.from('asset_warranty').upsert({
+                asset_id: insertedAsset.id,
+                warranty_start_date: wStart,
+                warranty_end_date: wEnd,
+                provider: record.vendor || record.warranty_provider || null,
+                contact_info: record.warranty_contact_info || null
+              }, { onConflict: 'asset_id' });
+            }
+          }
         }
 
         successful++;

@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useAssetStore } from '../../../store/assetStore';
+import { useAuthStore } from '../../../store/authStore';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,7 +12,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, ShieldCheck, ChevronDown, ChevronUp } from 'lucide-react';
 
 import { useQuery } from '@tanstack/react-query';
 import api from '../../../lib/api';
@@ -34,6 +35,12 @@ const assetSchema = z.object({
   notes: z.string().optional(),
   assigned_to: z.string().optional(),
   warranty: z.string().optional(),
+  warranty_start_date: z.string().optional(),
+  warranty_end_date: z.string().optional(),
+  amc_start_date: z.string().optional(),
+  amc_end_date: z.string().optional(),
+  warranty_provider: z.string().optional(),
+  warranty_contact_info: z.string().optional(),
   port_number: z.string().optional(),
 });
 
@@ -42,6 +49,8 @@ type AssetFormValues = z.infer<typeof assetSchema>;
 export function AssetForm() {
   const navigate = useNavigate();
   const { createAsset, loading, categories, fetchCategories } = useAssetStore();
+  const { profile } = useAuthStore();
+  const [showAdvancedWarranty, setShowAdvancedWarranty] = useState(false);
 
   const { data: units = [] } = useQuery({
     queryKey: ['units'],
@@ -85,6 +94,12 @@ export function AssetForm() {
       notes: '',
       assigned_to: '',
       warranty: '',
+      warranty_start_date: '',
+      warranty_end_date: '',
+      amc_start_date: '',
+      amc_end_date: '',
+      warranty_provider: '',
+      warranty_contact_info: '',
       port_number: ''
     },
   });
@@ -93,11 +108,40 @@ export function AssetForm() {
     fetchCategories();
   }, []);
 
+  // Pre-fill raising technician/user unit & department if available
+  useEffect(() => {
+    if (profile?.units?.name && !form.getValues('unit')) {
+      form.setValue('unit', profile.units.name);
+    }
+    if (profile?.departments?.name && !form.getValues('department')) {
+      form.setValue('department', profile.departments.name);
+    }
+  }, [profile]);
+
+  const handleQuickDuration = (years: number) => {
+    const pDate = form.getValues('purchase_date') || form.getValues('warranty_start_date') || new Date().toISOString().split('T')[0];
+    const sDate = new Date(pDate);
+    if (!isNaN(sDate.getTime())) {
+      const eDate = new Date(sDate);
+      eDate.setFullYear(eDate.getFullYear() + years);
+      const eStr = eDate.toISOString().split('T')[0];
+      form.setValue('warranty', `${years} Year${years > 1 ? 's' : ''}`, { shouldDirty: true });
+      form.setValue('warranty_start_date', pDate, { shouldDirty: true });
+      form.setValue('warranty_end_date', eStr, { shouldDirty: true });
+      if (!form.getValues('warranty_provider') && form.getValues('vendor')) {
+        form.setValue('warranty_provider', form.getValues('vendor'));
+      }
+    }
+  };
+
   const onSubmit = async (data: AssetFormValues) => {
     try {
       const payload = { ...data };
       if (payload.assigned_to === 'unassigned' || payload.assigned_to === '') {
         delete payload.assigned_to;
+      }
+      if (!payload.warranty_provider && payload.vendor) {
+        payload.warranty_provider = payload.vendor;
       }
       await createAsset(payload);
       navigate('/assets');
@@ -421,19 +465,35 @@ export function AssetForm() {
                   )}
                 />
 
-                <FormField
-                  control={form.control as any}
-                  name="warranty"
-                  render={({ field }) => (
-                    <FormItem className="space-y-1.5">
-                      <FormLabel className="text-xs font-semibold">Warranty</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. 3 Years or 12/31/2026" className="h-9 text-sm" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                <div className="space-y-1.5">
+                  <FormField
+                    control={form.control as any}
+                    name="warranty"
+                    render={({ field }) => (
+                      <FormItem className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <FormLabel className="text-xs font-semibold">Warranty</FormLabel>
+                          <div className="flex items-center gap-1">
+                            {[1, 2, 3, 5].map(yrs => (
+                              <button
+                                key={yrs}
+                                type="button"
+                                className="text-[10px] font-medium px-1.5 py-0.5 rounded border border-muted-foreground/30 hover:bg-muted text-muted-foreground hover:text-foreground"
+                                onClick={() => handleQuickDuration(yrs)}
+                              >
+                                +{yrs}y
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <FormControl>
+                          <Input placeholder="e.g. 5 Years or 2030-01-09" className="h-9 text-sm" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
 
                 <FormField
                   control={form.control as any}
@@ -449,7 +509,95 @@ export function AssetForm() {
                   )}
                 />
 
-                <div className="col-span-1 sm:col-span-2 lg:col-span-1"></div>
+                {/* Advanced Warranty & AMC Toggle */}
+                <div className="col-span-1 sm:col-span-2 lg:col-span-4 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedWarranty(s => !s)}
+                    className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    {showAdvancedWarranty ? 'Hide Warranty & AMC Dates' : '+ Add / Track Detailed Warranty & AMC Dates'}
+                    {showAdvancedWarranty ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                  </button>
+
+                  {showAdvancedWarranty && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-3 p-3 rounded-lg border bg-muted/20">
+                      <FormField
+                        control={form.control as any}
+                        name="warranty_start_date"
+                        render={({ field }) => (
+                          <FormItem className="space-y-1">
+                            <FormLabel className="text-xs">Warranty Start Date</FormLabel>
+                            <FormControl>
+                              <Input type="date" className="h-8 text-xs" {...field} />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control as any}
+                        name="warranty_end_date"
+                        render={({ field }) => (
+                          <FormItem className="space-y-1">
+                            <FormLabel className="text-xs">Warranty End Date</FormLabel>
+                            <FormControl>
+                              <Input type="date" className="h-8 text-xs" {...field} />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control as any}
+                        name="amc_start_date"
+                        render={({ field }) => (
+                          <FormItem className="space-y-1">
+                            <FormLabel className="text-xs">AMC Start Date</FormLabel>
+                            <FormControl>
+                              <Input type="date" className="h-8 text-xs" {...field} />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control as any}
+                        name="amc_end_date"
+                        render={({ field }) => (
+                          <FormItem className="space-y-1">
+                            <FormLabel className="text-xs">AMC End Date</FormLabel>
+                            <FormControl>
+                              <Input type="date" className="h-8 text-xs" {...field} />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control as any}
+                        name="warranty_provider"
+                        render={({ field }) => (
+                          <FormItem className="space-y-1 sm:col-span-2">
+                            <FormLabel className="text-xs">Warranty / AMC Provider</FormLabel>
+                            <FormControl>
+                              <Input placeholder="e.g. ASUS Support" className="h-8 text-xs" {...field} />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control as any}
+                        name="warranty_contact_info"
+                        render={({ field }) => (
+                          <FormItem className="space-y-1 sm:col-span-2">
+                            <FormLabel className="text-xs">Support Contact Info</FormLabel>
+                            <FormControl>
+                              <Input placeholder="e.g. support@asus.com, 1800-XXX-XXXX" className="h-8 text-xs" {...field} />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  )}
+                </div>
 
                 <div className="col-span-1 sm:col-span-2 lg:col-span-4">
                   <FormField

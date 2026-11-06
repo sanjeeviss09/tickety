@@ -148,22 +148,20 @@ export function TicketForm() {
   });
 
   const assets = Array.isArray(rawAssets) ? rawAssets : [];
+  const assetIdsKey = assets.map((a: any) => a.id).join(',');
 
   useEffect(() => {
-    // Auto-select default asset when assets change
+    // Auto-select the employee's asset: default asset first, else the first assigned asset
     if (assets.length > 0) {
-      const defaultAsset = assets.find((a: any) => 
+      const defaultAsset = assets.find((a: any) =>
         a.assignments?.some((ass: any) => ass.is_default && ass.assigned_to === activeEmployeeId)
       );
-      if (defaultAsset) {
-        form.setValue('asset_id', defaultAsset.id);
-      } else {
-        form.setValue('asset_id', 'none');
-      }
+      form.setValue('asset_id', (defaultAsset || assets[0]).id);
     } else {
       form.setValue('asset_id', 'none');
     }
-  }, [assets, activeEmployeeId, form]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assetIdsKey, activeEmployeeId]);
 
   useEffect(() => {
     if (ticketFor === 'myself' && profile) {

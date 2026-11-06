@@ -271,8 +271,9 @@ export const getAssets = async (req: Request, res: Response) => {
       `);
       
     // Apply role restrictions
-    if (role === 'Employee') {
-      // Employees only see assets currently assigned to them
+    // Employees see their own assets; when raising a ticket on behalf of a colleague
+    // they may look up that colleague's assigned assets via ?assigned_to=
+    if (role === 'Employee' && !req.query.assigned_to) {
       query = query.eq('assignments.assigned_to', userId).eq('assignments.status', 'Active');
     }
 
@@ -291,7 +292,7 @@ export const getAssets = async (req: Request, res: Response) => {
     
     // For Employee or when assigned_to filter is used, filter out simulated empty joins
     let filteredData = Array.isArray(data) ? data : [];
-    if (role === 'Employee') {
+    if (role === 'Employee' && !req.query.assigned_to) {
       filteredData = filteredData.filter((a: any) => a.assignments && a.assignments.some((ass: any) => ass.assigned_to === userId && ass.status === 'Active'));
     } else if (req.query.assigned_to) {
       filteredData = filteredData.filter((a: any) => a.assignments && a.assignments.some((ass: any) => ass.assigned_to === req.query.assigned_to && ass.status === 'Active'));

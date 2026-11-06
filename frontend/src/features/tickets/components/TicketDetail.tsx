@@ -392,7 +392,7 @@ export function TicketDetail() {
   const { profile } = useAuthStore();
   const queryClient = useQueryClient();
 
-  const role = profile?.roles?.name;
+  const role = profile?.roles?.name || profile?.roles?.[0]?.name || profile?.role?.name || profile?.role;
 
   const { data, isLoading: loading, error: queryError, refetch: reload } = useTicketDetail(id, role);
   
@@ -440,6 +440,20 @@ export function TicketDetail() {
     withBusy(() => api.post(`/tickets/${id}/confirm-resolution`, { confirmed: true, rating, feedback_comment: comment || null }).then(() => {}));
   const handleReject = (reason: string) =>
     withBusy(() => api.post(`/tickets/${id}/confirm-resolution`, { confirmed: false, rejection_reason: reason }).then(() => {}));
+  const handleDeleteTicket = async () => {
+    if (!window.confirm('Are you sure you want to delete this ticket? This action cannot be undone.')) return;
+    setBusy(true);
+    setActionError('');
+    try {
+      await api.delete(`/tickets/${id}`);
+      queryClient.invalidateQueries({ queryKey: ['tickets'] });
+      navigate('/tickets');
+    } catch (err: any) {
+      setActionError(err.response?.data?.message || err.message || 'Failed to delete ticket');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (loading) return <div className="flex flex-col items-center justify-center min-h-[400px]"><Loader2 className="h-10 w-10 animate-spin text-primary mb-4" /><p className="text-muted-foreground animate-pulse">Loading ticket details...</p></div>;
   if (error) return (
@@ -477,7 +491,14 @@ export function TicketDetail() {
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight">{ticket.ticket_number}: {ticket.subject}</h1>
           <p className="text-muted-foreground text-sm mt-1">Submitted by {ticket.requester?.full_name || ticket.creator?.full_name} on {new Date(ticket.created_at).toLocaleString()}</p>
         </div>
-        <Button variant="outline" className="shrink-0" onClick={() => navigate(-1)}>Back</Button>
+        <div className="flex items-center gap-2 shrink-0">
+          {isAdmin && (
+            <Button variant="destructive" size="default" onClick={handleDeleteTicket} disabled={busy}>
+              <Trash2 className="mr-2 h-4 w-4" /> Delete Ticket
+            </Button>
+          )}
+          <Button variant="outline" onClick={() => navigate(-1)}>Back</Button>
+        </div>
       </div>
 
       {actionError && (

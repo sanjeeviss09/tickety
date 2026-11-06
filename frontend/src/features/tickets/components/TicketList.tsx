@@ -55,6 +55,9 @@ export function TicketList() {
   const totalCount = ticketsData?.count || 0;
   const hasMore = (page + 1) * limit < totalCount;
 
+  const roleName = profile?.roles?.name || profile?.roles?.[0]?.name || profile?.role?.name || profile?.role;
+  const isAdmin = typeof roleName === 'string' && roleName.toLowerCase() === 'admin';
+
   const handleDelete = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this ticket?')) {
       try {
@@ -274,39 +277,41 @@ export function TicketList() {
           ) : (
             <div className="w-full mt-4 sm:mt-0 space-y-4">
               {/* ── Desktop Data Table (hidden on mobile) ── */}
-              <div className="hidden md:block rounded-md border overflow-hidden bg-card shadow-sm">
+              <div className="hidden md:block rounded-md border overflow-x-auto bg-card shadow-sm">
                 <table className="w-full text-sm text-left">
                   <thead className="text-xs uppercase bg-muted text-muted-foreground border-b">
                     <tr>
-                      <th className="px-4 py-3 font-semibold">Ticket ID</th>
-                      <th className="px-4 py-3 font-semibold">Subject</th>
-                      <th className="px-4 py-3 font-semibold">Status</th>
-                      <th className="px-4 py-3 font-semibold">Priority</th>
-                      <th className="px-4 py-3 font-semibold">SLA</th>
-                      <th className="px-4 py-3 font-semibold hidden lg:table-cell">Category</th>
-                      <th className="px-4 py-3 font-semibold">Assignee</th>
-                      <th className="px-4 py-3 font-semibold hidden lg:table-cell">Updated</th>
-                      <th className="px-4 py-3"></th>
+                      <th className="px-3 py-3 font-semibold whitespace-nowrap">Ticket ID</th>
+                      <th className="px-3 py-3 font-semibold">Subject</th>
+                      <th className="px-3 py-3 font-semibold whitespace-nowrap">Status</th>
+                      <th className="px-3 py-3 font-semibold whitespace-nowrap">Priority</th>
+                      <th className="px-3 py-3 font-semibold whitespace-nowrap">SLA</th>
+                      <th className="px-3 py-3 font-semibold hidden xl:table-cell whitespace-nowrap">Category</th>
+                      <th className="px-3 py-3 font-semibold whitespace-nowrap">Assignee</th>
+                      <th className="px-3 py-3 font-semibold hidden lg:table-cell whitespace-nowrap">Updated</th>
+                      <th className="px-3 py-3 font-semibold text-right whitespace-nowrap">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {tickets.map((ticket: any) => (
                       <tr key={ticket.id} className="hover:bg-muted/50 transition-colors group">
-                        <td className="px-4 py-3 font-medium whitespace-nowrap">
+                        <td className="px-3 py-3 font-medium whitespace-nowrap">
                           <Link to={`/tickets/${ticket.id}`} className="text-primary hover:underline">
                             {ticket.ticket_number}
                           </Link>
                         </td>
-                        <td className="px-4 py-3 max-w-[300px]">
-                          <div className="truncate font-medium">{ticket.subject}</div>
+                        <td className="px-3 py-3">
+                          <div className="truncate font-medium max-w-[160px] lg:max-w-[200px] xl:max-w-[260px]" title={ticket.subject}>
+                            {ticket.subject}
+                          </div>
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
+                        <td className="px-3 py-3 whitespace-nowrap">
                           <StatusBadge status={ticket.status} />
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
+                        <td className="px-3 py-3 whitespace-nowrap">
                           <PriorityBadge priority={ticket.priority} showIcon={false} />
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
+                        <td className="px-3 py-3 whitespace-nowrap">
                           <SlaBadge 
                             dueDate={ticket.due_date} 
                             status={ticket.status} 
@@ -315,29 +320,35 @@ export function TicketList() {
                             createdAt={ticket.created_at}
                           />
                         </td>
-                        <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground truncate max-w-[150px]">
-                          {ticket.ticket_categories?.name || ticket.categories?.name || '-'}
+                        <td className="px-3 py-3 hidden xl:table-cell text-muted-foreground">
+                          <div className="truncate max-w-[130px]">
+                            {ticket.ticket_categories?.name || ticket.categories?.name || '-'}
+                          </div>
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">
-                          {Array.isArray(ticket.assignee) ? ticket.assignee[0]?.full_name : ticket.assignee?.full_name || 'Unassigned'}
+                        <td className="px-3 py-3 text-muted-foreground">
+                          <div className="truncate max-w-[130px]">
+                            {Array.isArray(ticket.assignee) ? ticket.assignee[0]?.full_name : ticket.assignee?.full_name || 'Unassigned'}
+                          </div>
                         </td>
-                        <td className="px-4 py-3 hidden lg:table-cell whitespace-nowrap text-muted-foreground text-xs">
+                        <td className="px-3 py-3 hidden lg:table-cell whitespace-nowrap text-muted-foreground text-xs">
                           {new Date(ticket.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                         </td>
-                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                        <td className="px-3 py-3 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-2">
-                            <Link to={`/tickets/${ticket.id}`} className="text-primary hover:underline text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Link to={`/tickets/${ticket.id}`} className="text-primary hover:underline text-xs font-medium">
                               View
                             </Link>
-                            {((profile?.roles?.name || profile?.roles?.[0]?.name || profile?.role?.name || profile?.role) === 'Admin' || ticket.created_by === profile?.id) && (
+                            {isAdmin && (
                               <Button 
                                 variant="ghost" 
                                 size="icon"
-                                className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                                className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
                                 onClick={(e) => {
                                   e.preventDefault();
+                                  e.stopPropagation();
                                   handleDelete(ticket.id);
                                 }}
+                                title="Delete ticket"
                                 aria-label="Delete ticket"
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -379,13 +390,31 @@ export function TicketList() {
                       {ticket.subject}
                     </h3>
                     <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground opacity-30" />
-                    <div className="flex flex-col gap-1.5 mt-1 pt-3 border-t">
-                      <p className="text-xs text-muted-foreground">
-                        {ticket.ticket_categories?.name || ticket.categories?.name || 'General'} • {Array.isArray(ticket.assignee) ? ticket.assignee[0]?.full_name : ticket.assignee?.full_name || 'Unassigned'}
-                      </p>
-                      <p className="text-[11px] text-muted-foreground/70">
-                        Updated {new Date(ticket.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} • {new Date(ticket.updated_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-                      </p>
+                    <div className="flex items-center justify-between gap-2 mt-1 pt-3 border-t">
+                      <div className="flex flex-col gap-1">
+                        <p className="text-xs text-muted-foreground">
+                          {ticket.ticket_categories?.name || ticket.categories?.name || 'General'} • {Array.isArray(ticket.assignee) ? ticket.assignee[0]?.full_name : ticket.assignee?.full_name || 'Unassigned'}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground/70">
+                          Updated {new Date(ticket.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} • {new Date(ticket.updated_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      </div>
+                      {isAdmin && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive shrink-0"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleDelete(ticket.id);
+                          }}
+                          title="Delete ticket"
+                          aria-label="Delete ticket"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
                   </Link>
                 ))}

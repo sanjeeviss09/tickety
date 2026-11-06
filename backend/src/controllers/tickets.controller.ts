@@ -660,7 +660,7 @@ export const deleteTicket = async (req: Request, res: Response) => {
       return res.status(404).json({ status: 'error', message: 'Ticket not found' });
     }
 
-    if (req.user?.role !== 'Admin' && ticket.created_by !== req.user?.id) {
+    if (req.user?.role?.toLowerCase() !== 'admin' && ticket.created_by !== req.user?.id) {
       return res.status(403).json({ status: 'error', message: 'Forbidden' });
     }
 

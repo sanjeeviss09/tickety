@@ -30,8 +30,8 @@ export const requireAuth = async (req: AuthenticatedRequest, res: Response, next
     // Fetch the user profile to get roles and department information
     const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
-      .select('role_id, unit_id, department_id, roles(name)')
-      .eq('id', user.id)
+      .select('id, role_id, unit_id, department_id, roles(name)')
+      .or(`id.eq.${user.id},auth_user_id.eq.${user.id}`)
       .single();
 
     if (profileError || !profile) {
@@ -48,7 +48,7 @@ export const requireAuth = async (req: AuthenticatedRequest, res: Response, next
     }
 
     req.user = {
-      id: user.id,
+      id: profile.id,
       email: user.email,
       role: roleName || 'Admin', // default Admin for bootstrap user with no role set
       unit_id: profile.unit_id,

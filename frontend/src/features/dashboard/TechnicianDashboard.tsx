@@ -42,7 +42,7 @@ import {
   Search, ExternalLink, Shield, User, Building2, MapPin, Phone, Mail,
   CheckSquare, FileText, Monitor, WifiOff, PrinterIcon,
   ChevronLeft, Inbox, Zap, TrendingUp, Activity, ListChecks,
-  ArrowRight, Star, CheckCheck, XCircle, ClockAlert, Loader2,
+  ArrowRight, Star, CheckCheck, XCircle, ClockAlert, Loader2, X,
 } from 'lucide-react';
 
 import { ResolutionBreakdownDialog } from './components/ResolutionBreakdownDialog';
@@ -471,6 +471,43 @@ export function TechnicianDashboard() {
   const { data: awaitingConfirmations, isLoading: acLoading, error: acError, refetch: refetchAc } = useAwaitingConfirmationTickets();
   const { data: reopenedTickets } = useReopenedTickets();
 
+  const [dismissedReopenedKeys, setDismissedReopenedKeys] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('tickety:dismissed-reopened-tickets');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const getReopenedKey = (ticket: any) => `${ticket.id}:${ticket.reopened_at || ticket.reopen_count || ''}`;
+
+  const dismissReopenedTicket = (ticket: any) => {
+    const key = getReopenedKey(ticket);
+    setDismissedReopenedKeys((prev) => {
+      const next = Array.from(new Set([...prev, key]));
+      try {
+        localStorage.setItem('tickety:dismissed-reopened-tickets', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const dismissAllReopenedTickets = (tickets: any[]) => {
+    const keys = tickets.map(getReopenedKey);
+    setDismissedReopenedKeys((prev) => {
+      const next = Array.from(new Set([...prev, ...keys]));
+      try {
+        localStorage.setItem('tickety:dismissed-reopened-tickets', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const visibleReopenedTickets = (reopenedTickets ?? []).filter(
+    (ticket: any) => !dismissedReopenedKeys.includes(getReopenedKey(ticket))
+  );
+
   // Mutations
   const markRead = useMarkNotificationRead();
 
@@ -620,10 +657,10 @@ export function TechnicianDashboard() {
       </div>
 
       {/* ── Reopened / Rejected by Employee Alert Banner ───────────────── */}
-      {reopenedTickets && reopenedTickets.length > 0 && (
-        <Card className="border-red-300 shadow-md">
+      {visibleReopenedTickets.length > 0 && (
+        <Card className="border-red-300 shadow-md relative">
           <CardHeader className="bg-gradient-to-r from-red-50 to-orange-50 rounded-t-lg border-b border-red-200 pb-4">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-start justify-between gap-2">
               <div>
                 <CardTitle className="text-red-900 flex items-center gap-2 text-lg">
                   <AlertCircle className="h-5 w-5 text-red-600" /> Reopened Tickets — Rejected by Employee
@@ -632,20 +669,31 @@ export function TechnicianDashboard() {
                   The employee reported that the following ticket(s) are not resolved. Please review the rejection reason and resume work.
                 </p>
               </div>
-              <Badge variant="outline" className="bg-white text-red-700 border-red-300 font-bold">
-                {reopenedTickets.length} Action Needed
-              </Badge>
+              <div className="flex items-center gap-2 shrink-0">
+                <Badge variant="outline" className="bg-white text-red-700 border-red-300 font-bold">
+                  {visibleReopenedTickets.length} Action Needed
+                </Badge>
+                <button
+                  type="button"
+                  onClick={() => dismissAllReopenedTickets(visibleReopenedTickets)}
+                  title="Remove alert banner"
+                  aria-label="Remove alert banner"
+                  className="p-1 rounded-md text-red-700 hover:text-red-950 hover:bg-red-200/60 transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y border-t border-red-100">
-              {reopenedTickets.map((ticket: any) => {
+              {visibleReopenedTickets.map((ticket: any) => {
                 const latestRejected = Array.isArray(ticket.confirmations)
                   ? [...ticket.confirmations].reverse().find((c: any) => c.status === 'Rejected' && c.rejection_reason)
                   : null;
                 const empName = (Array.isArray(ticket.creator) ? ticket.creator[0]?.full_name : ticket.creator?.full_name) || 'Employee';
                 return (
-                  <div key={ticket.id} className="p-4 hover:bg-red-50/40 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div key={ticket.id} className="p-4 hover:bg-red-50/40 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative">
                     <div className="space-y-1.5 flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <Link to={`/tickets/${ticket.id}`} className="font-semibold text-base hover:underline text-red-900">
@@ -670,9 +718,20 @@ export function TechnicianDashboard() {
                         </div>
                       )}
                     </div>
-                    <Button onClick={() => navigate(`/tickets/${ticket.id}`)} className="bg-red-600 hover:bg-red-700 text-white whitespace-nowrap shrink-0">
-                      View & Resume Work
-                    </Button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button onClick={() => navigate(`/tickets/${ticket.id}`)} className="bg-red-600 hover:bg-red-700 text-white whitespace-nowrap shrink-0">
+                        View & Resume Work
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={() => dismissReopenedTicket(ticket)}
+                        title="Remove from alert"
+                        aria-label="Remove from alert"
+                        className="p-1.5 rounded-md text-slate-400 hover:text-red-700 hover:bg-red-100 transition-colors"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                 );
               })}

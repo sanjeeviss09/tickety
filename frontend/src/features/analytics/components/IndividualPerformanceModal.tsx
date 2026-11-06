@@ -128,9 +128,10 @@ export function IndividualPerformanceModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
+      <DialogContent className="max-w-5xl max-h-[90vh] p-0 overflow-hidden">
+        <div className="flex flex-col max-h-[85vh] -m-6">
         {/* Header Profile */}
-        <DialogHeader className="p-6 pb-4 border-b bg-muted/20">
+        <DialogHeader className="p-6 pb-4 pr-12 border-b bg-muted/20 shrink-0">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex items-center gap-3.5">
               <Avatar className="h-12 w-12 border-2 border-primary/20 shadow-xs">
@@ -254,6 +255,7 @@ export function IndividualPerformanceModal({
                 <SelectItem value="Open">Open</SelectItem>
                 <SelectItem value="Assigned">Assigned</SelectItem>
                 <SelectItem value="In Progress">In Progress</SelectItem>
+                <SelectItem value="Reopened">Reopened</SelectItem>
                 <SelectItem value="Waiting for User">Waiting for User</SelectItem>
                 <SelectItem value="Resolved">Resolved</SelectItem>
                 <SelectItem value="Closed">Closed</SelectItem>
@@ -293,110 +295,118 @@ export function IndividualPerformanceModal({
               </p>
             </div>
           ) : (
-            <div className="divide-y divide-border">
-              {/* Header */}
-              <div className="hidden md:grid md:grid-cols-12 px-6 py-2 bg-muted/40 text-[11px] font-semibold uppercase text-muted-foreground tracking-wider">
-                <div className="col-span-2">Ticket #</div>
-                <div className="col-span-4">Subject & Category</div>
-                <div className="col-span-2">Status</div>
-                <div className="col-span-2">Timeline</div>
-                <div className="col-span-2 text-right">Time Taken / SLA</div>
-              </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left border-collapse">
+                <thead className="bg-muted/40 text-[11px] font-semibold uppercase text-muted-foreground tracking-wider border-b sticky top-0 z-10">
+                  <tr>
+                    <th className="px-4 py-2.5 whitespace-nowrap">Ticket #</th>
+                    <th className="px-3 py-2.5 whitespace-nowrap">Priority</th>
+                    <th className="px-4 py-2.5">Subject & Category</th>
+                    <th className="px-3 py-2.5 whitespace-nowrap">Status</th>
+                    <th className="px-3 py-2.5 whitespace-nowrap">Timeline</th>
+                    <th className="px-4 py-2.5 text-right whitespace-nowrap">Time Taken / SLA</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {filteredTickets.map((t: any) => (
+                    <tr key={t.id} className="hover:bg-muted/30 transition-colors">
+                      {/* Ticket ID */}
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <Link
+                          to={`/tickets/${t.id}`}
+                          className="font-mono text-xs font-semibold text-primary hover:underline"
+                          onClick={() => onOpenChange(false)}
+                        >
+                          {t.ticket_number}
+                        </Link>
+                      </td>
 
-              {/* Rows */}
-              {filteredTickets.map((t: any) => (
-                <div
-                  key={t.id}
-                  className="p-4 md:px-6 md:py-3 hover:bg-muted/30 transition-colors flex flex-col md:grid md:grid-cols-12 md:items-center gap-2 md:gap-0"
-                >
-                  {/* Ticket ID & Priority */}
-                  <div className="md:col-span-2 flex items-center gap-2">
-                    <Link
-                      to={`/tickets/${t.id}`}
-                      className="font-mono text-xs font-semibold text-primary hover:underline"
-                      onClick={() => onOpenChange(false)}
-                    >
-                      {t.ticket_number}
-                    </Link>
-                    <PriorityBadge priority={t.priority} showIcon={false} />
-                  </div>
+                      {/* Priority */}
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <PriorityBadge priority={t.priority} showIcon={false} />
+                      </td>
 
-                  {/* Subject & Category */}
-                  <div className="md:col-span-4 pr-3">
-                    <p className="text-xs font-medium truncate" title={t.subject}>
-                      {t.subject}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground truncate">
-                      {t.category || 'General'} {t.unit ? `• ${t.unit}` : ''}
-                    </p>
-                  </div>
+                      {/* Subject & Category */}
+                      <td className="px-4 py-3 max-w-[260px]">
+                        <p className="text-xs font-semibold text-foreground truncate" title={t.subject}>
+                          {t.subject}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                          {t.category || 'General'} {t.unit ? `• ${t.unit}` : ''}
+                        </p>
+                      </td>
 
-                  {/* Status */}
-                  <div className="md:col-span-2">
-                    <StatusBadge status={t.status} />
-                  </div>
+                      {/* Status */}
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <StatusBadge status={t.status} />
+                      </td>
 
-                  {/* Timeline */}
-                  <div className="md:col-span-2 text-xs text-muted-foreground space-y-0.5">
-                    <div className="text-[11px]">
-                      <span className="text-muted-foreground/60">Created:</span>{' '}
-                      {new Date(t.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-                    </div>
-                    {t.resolved_at && (
-                      <div className="text-[11px]">
-                        <span className="text-muted-foreground/60">Resolved:</span>{' '}
-                        {new Date(t.resolved_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-                      </div>
-                    )}
-                  </div>
+                      {/* Timeline */}
+                      <td className="px-3 py-3 whitespace-nowrap text-xs text-muted-foreground space-y-0.5">
+                        <div className="text-[11px]">
+                          <span className="text-muted-foreground/60">Created:</span>{' '}
+                          {new Date(t.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                        </div>
+                        {t.resolved_at && (
+                          <div className="text-[11px]">
+                            <span className="text-muted-foreground/60">Resolved:</span>{' '}
+                            {new Date(t.resolved_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                          </div>
+                        )}
+                      </td>
 
-                  {/* Time Taken & SLA */}
-                  <div className="md:col-span-2 md:text-right flex md:flex-col items-center md:items-end justify-between md:justify-center gap-1">
-                    {t.duration_formatted ? (
-                      <Badge
-                        variant="secondary"
-                        className={`font-mono text-xs font-bold px-2 py-0.5 rounded-md ${
-                          t.is_breached
-                            ? 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 border-red-200'
-                            : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200'
-                        }`}
-                      >
-                        ⏱️ {t.duration_formatted}
-                      </Badge>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">In progress</span>
-                    )}
+                      {/* Time Taken & SLA */}
+                      <td className="px-4 py-3 text-right whitespace-nowrap">
+                        <div className="flex flex-col items-end justify-center gap-1">
+                          {t.duration_formatted ? (
+                            <Badge
+                              variant="secondary"
+                              className={`font-mono text-xs font-bold px-2 py-0.5 rounded-md ${
+                                t.is_breached
+                                  ? 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 border-red-200'
+                                  : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200'
+                              }`}
+                            >
+                              ⏱️ {t.duration_formatted}
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">In progress</span>
+                          )}
 
-                    <span className="text-[10px]">
-                      {t.sla_status === 'Breached' ? (
-                        <span className="text-red-600 font-medium flex items-center gap-0.5">
-                          <AlertTriangle className="h-3 w-3" /> Breached
-                        </span>
-                      ) : t.sla_status === 'Compliant' ? (
-                        <span className="text-emerald-600 font-medium flex items-center gap-0.5">
-                          <CheckCircle2 className="h-3 w-3" /> Compliant
-                        </span>
-                      ) : t.sla_status === 'Overdue' ? (
-                        <span className="text-red-600 font-medium flex items-center gap-0.5">
-                          <AlertTriangle className="h-3 w-3" /> Overdue
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">{t.sla_status}</span>
-                      )}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                          <span className="text-[10px]">
+                            {t.sla_status === 'Breached' ? (
+                              <span className="text-red-600 font-medium flex items-center gap-0.5">
+                                <AlertTriangle className="h-3 w-3" /> Breached
+                              </span>
+                            ) : t.sla_status === 'Compliant' ? (
+                              <span className="text-emerald-600 font-medium flex items-center gap-0.5">
+                                <CheckCircle2 className="h-3 w-3" /> Compliant
+                              </span>
+                            ) : t.sla_status === 'Overdue' ? (
+                              <span className="text-red-600 font-medium flex items-center gap-0.5">
+                                <AlertTriangle className="h-3 w-3" /> Overdue
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">{t.sla_status}</span>
+                            )}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="p-3 border-t bg-muted/20 flex items-center justify-between text-xs text-muted-foreground px-6">
+        <div className="p-3 border-t bg-muted/20 flex items-center justify-between text-xs text-muted-foreground px-6 shrink-0">
           <span>Showing {filteredTickets.length} of {rawTickets.length} tickets</span>
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} className="h-8">
             Close
           </Button>
+        </div>
         </div>
       </DialogContent>
     </Dialog>

@@ -124,9 +124,10 @@ export function ResolutionBreakdownDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
+      <DialogContent className="max-w-5xl max-h-[90vh] p-0 overflow-hidden">
+        <div className="flex flex-col max-h-[85vh] -m-6">
         {/* Header */}
-        <DialogHeader className="p-6 pb-4 border-b bg-muted/20">
+        <DialogHeader className="p-6 pb-4 pr-12 border-b bg-muted/20 shrink-0">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="p-2.5 rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300">
@@ -269,129 +270,139 @@ export function ResolutionBreakdownDialog({
               </p>
             </div>
           ) : (
-            <div className="divide-y divide-border">
-              {/* Desktop Table Header */}
-              <div className="hidden md:grid md:grid-cols-12 px-6 py-2.5 bg-muted/40 text-xs font-semibold uppercase text-muted-foreground tracking-wider">
-                <div className="col-span-2">Ticket #</div>
-                <div className="col-span-3">Subject</div>
-                <div className="col-span-2">Assignee</div>
-                <div className="col-span-2">Timeline</div>
-                <div className="col-span-2 text-right">Time Taken</div>
-                <div className="col-span-1 text-right">Action</div>
-              </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left border-collapse">
+                <thead className="bg-muted/40 text-xs font-semibold uppercase text-muted-foreground tracking-wider border-b sticky top-0 z-10">
+                  <tr>
+                    <th className="px-4 py-2.5 whitespace-nowrap">Ticket #</th>
+                    <th className="px-3 py-2.5 whitespace-nowrap">Priority</th>
+                    <th className="px-4 py-2.5">Subject & Category</th>
+                    <th className="px-3 py-2.5 whitespace-nowrap">Assignee</th>
+                    <th className="px-3 py-2.5 whitespace-nowrap">Timeline</th>
+                    <th className="px-4 py-2.5 text-right whitespace-nowrap">Time Taken</th>
+                    <th className="px-4 py-2.5 text-right whitespace-nowrap">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {tickets.map((t: any) => {
+                    const isOverAvg = summary?.avgResolutionHours && t.resolution_hours > summary.avgResolutionHours;
 
-              {/* Rows */}
-              {tickets.map((t: any) => {
-                const isOverAvg = summary?.avgResolutionHours && t.resolution_hours > summary.avgResolutionHours;
+                    return (
+                      <tr key={t.id} className="hover:bg-muted/30 transition-colors">
+                        {/* Ticket # */}
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <Link
+                            to={`/tickets/${t.id}`}
+                            className="font-mono text-xs font-semibold text-primary hover:underline"
+                            onClick={() => onOpenChange(false)}
+                          >
+                            {t.ticket_number}
+                          </Link>
+                        </td>
 
-                return (
-                  <div
-                    key={t.id}
-                    className="p-4 md:px-6 md:py-3.5 hover:bg-muted/30 transition-colors flex flex-col md:grid md:grid-cols-12 md:items-center gap-2 md:gap-0"
-                  >
-                    {/* Ticket & Priority */}
-                    <div className="md:col-span-2 flex items-center gap-2">
-                      <Link
-                        to={`/tickets/${t.id}`}
-                        className="font-mono text-xs font-semibold text-primary hover:underline flex items-center gap-1"
-                        onClick={() => onOpenChange(false)}
-                      >
-                        {t.ticket_number}
-                      </Link>
-                      <PriorityBadge priority={t.priority} showIcon={false} />
-                    </div>
+                        {/* Priority */}
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          <PriorityBadge priority={t.priority} showIcon={false} />
+                        </td>
 
-                    {/* Subject & Category */}
-                    <div className="md:col-span-3 pr-2">
-                      <p className="text-sm font-medium truncate" title={t.subject}>
-                        {t.subject}
-                      </p>
-                      <p className="text-[11px] text-muted-foreground truncate">
-                        {t.category || 'General'} {t.department ? `• ${t.department}` : ''}
-                      </p>
-                    </div>
+                        {/* Subject & Category */}
+                        <td className="px-4 py-3 max-w-[240px]">
+                          <p className="text-sm font-medium truncate" title={t.subject}>
+                            {t.subject}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                            {t.category || 'General'} {t.department ? `• ${t.department}` : ''}
+                          </p>
+                        </td>
 
-                    {/* Assignee */}
-                    <div className="md:col-span-2 flex items-center gap-2">
-                      <Avatar className="h-6 w-6">
-                        <AvatarImage src={t.assignee?.profile_picture_url} />
-                        <AvatarFallback className="text-[10px]">
-                          {(t.assignee?.full_name || 'U').slice(0, 2).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                      <span className="text-xs truncate text-muted-foreground">
-                        {t.assignee?.full_name || 'Unassigned'}
-                      </span>
-                    </div>
+                        {/* Assignee */}
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <Avatar className="h-6 w-6">
+                              <AvatarImage src={t.assignee?.profile_picture_url} />
+                              <AvatarFallback className="text-[10px]">
+                                {(t.assignee?.full_name || 'U').slice(0, 2).toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span className="text-xs truncate max-w-[120px] text-muted-foreground">
+                              {t.assignee?.full_name || 'Unassigned'}
+                            </span>
+                          </div>
+                        </td>
 
-                    {/* Timeline */}
-                    <div className="md:col-span-2 text-xs text-muted-foreground space-y-0.5">
-                      <div className="flex items-center gap-1 text-[11px]">
-                        <span className="text-muted-foreground/60">Created:</span>{' '}
-                        {new Date(t.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-                      </div>
-                      <div className="flex items-center gap-1 text-[11px]">
-                        <span className="text-muted-foreground/60">Resolved:</span>{' '}
-                        {new Date(t.resolved_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                      </div>
-                    </div>
+                        {/* Timeline */}
+                        <td className="px-3 py-3 whitespace-nowrap text-xs text-muted-foreground space-y-0.5">
+                          <div className="flex items-center gap-1 text-[11px]">
+                            <span className="text-muted-foreground/60">Created:</span>{' '}
+                            {new Date(t.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                          </div>
+                          <div className="flex items-center gap-1 text-[11px]">
+                            <span className="text-muted-foreground/60">Resolved:</span>{' '}
+                            {new Date(t.resolved_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </td>
 
-                    {/* Time Taken (Individual) */}
-                    <div className="md:col-span-2 md:text-right flex md:flex-col items-center md:items-end justify-between md:justify-center gap-1">
-                      <Badge
-                        variant="secondary"
-                        className={`font-mono text-xs font-bold px-2 py-0.5 rounded-md ${
-                          t.is_breached
-                            ? 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 border-red-200'
-                            : isOverAvg
-                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border-amber-200'
-                            : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200'
-                        }`}
-                      >
-                        ⏱️ {t.resolution_formatted}
-                      </Badge>
-                      <span className="text-[10px] text-muted-foreground">
-                        {t.sla_status === 'Breached' ? (
-                          <span className="text-red-600 font-medium flex items-center gap-0.5">
-                            <AlertTriangle className="h-3 w-3" /> SLA Breached
-                          </span>
-                        ) : t.sla_status === 'Compliant' ? (
-                          <span className="text-emerald-600 font-medium flex items-center gap-0.5">
-                            <CheckCircle2 className="h-3 w-3" /> Compliant
-                          </span>
-                        ) : (
-                          'No SLA'
-                        )}
-                      </span>
-                    </div>
+                        {/* Time Taken */}
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                          <div className="flex flex-col items-end justify-center gap-1">
+                            <Badge
+                              variant="secondary"
+                              className={`font-mono text-xs font-bold px-2 py-0.5 rounded-md ${
+                                t.is_breached
+                                  ? 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 border-red-200'
+                                  : isOverAvg
+                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border-amber-200'
+                                  : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200'
+                              }`}
+                            >
+                              ⏱️ {t.resolution_formatted}
+                            </Badge>
+                            <span className="text-[10px] text-muted-foreground">
+                              {t.sla_status === 'Breached' ? (
+                                <span className="text-red-600 font-medium flex items-center gap-0.5">
+                                  <AlertTriangle className="h-3 w-3" /> SLA Breached
+                                </span>
+                              ) : t.sla_status === 'Compliant' ? (
+                                <span className="text-emerald-600 font-medium flex items-center gap-0.5">
+                                  <CheckCircle2 className="h-3 w-3" /> Compliant
+                                </span>
+                              ) : (
+                                'No SLA'
+                              )}
+                            </span>
+                          </div>
+                        </td>
 
-                    {/* Action link */}
-                    <div className="md:col-span-1 md:text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        asChild
-                        className="h-7 px-2 text-xs text-primary hover:text-primary/80"
-                        onClick={() => onOpenChange(false)}
-                      >
-                        <Link to={`/tickets/${t.id}`}>
-                          View <ExternalLink className="h-3 w-3 ml-1" />
-                        </Link>
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
+                        {/* Action */}
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            asChild
+                            className="h-7 px-2 text-xs text-primary hover:text-primary/80"
+                            onClick={() => onOpenChange(false)}
+                          >
+                            <Link to={`/tickets/${t.id}`}>
+                              View <ExternalLink className="h-3 w-3 ml-1" />
+                            </Link>
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="p-3 border-t bg-muted/20 flex items-center justify-between text-xs text-muted-foreground px-6">
+        <div className="p-3 border-t bg-muted/20 flex items-center justify-between text-xs text-muted-foreground px-6 shrink-0">
           <span>Showing {tickets.length} of {rawTickets.length} resolved tickets</span>
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} className="h-8">
             Close
           </Button>
+        </div>
         </div>
       </DialogContent>
     </Dialog>

@@ -31,6 +31,8 @@ export interface TechPerformance {
   reopened: number;
   closed: number;
   pendingActive: number;
+  avgRating?: number | null;
+  totalRatings?: number;
 }
 
 export interface TechTrendPoint {
@@ -48,7 +50,8 @@ const TICKET_SELECT = `
   ticket_categories(name),
   departments(name),
   units(name),
-  confirmations:ticket_resolution_confirmations(status, rejection_reason, responded_at)
+  confirmations:ticket_resolution_confirmations(status, rejection_reason, responded_at),
+  ratings:ticket_ratings(rating, feedback_comment, submitted_at)
 `;
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
@@ -62,12 +65,45 @@ export function useTechnicianDashboardData() {
   return useQuery({
     queryKey: ['tech-dashboard-data'],
     queryFn: async () => {
-      const res = await api.get('/analytics/technician-dashboard');
+      const techId = getTechId();
+      const [res, ratingsRes] = await Promise.all([
+        api.get('/analytics/technician-dashboard'),
+        techId
+          ? supabase
+              .from('ticket_ratings')
+              .select('ticket_id, rating, submitted_at')
+              .eq('technician_id', techId)
+              .order('submitted_at', { ascending: true })
+          : Promise.resolve({ data: [] as any[] }),
+      ]);
       if (res.data.status !== 'success') throw new Error(res.data.message);
-      return res.data.data as {
+      const payload = res.data.data as {
         summary: TechWorkloadSummary;
         performance: TechPerformance;
         trend: TechTrendPoint[];
+      };
+
+      const ticketMap = new Map<string, number>();
+      (ratingsRes.data ?? []).forEach((r: any) => {
+        const val = Number(r.rating);
+        if (r.ticket_id && !isNaN(val) && val >= 1 && val <= 5) {
+          ticketMap.set(r.ticket_id, val);
+        }
+      });
+      const vals = Array.from(ticketMap.values());
+      const avgRating = vals.length > 0
+        ? Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 10) / 10
+        : null;
+
+      return {
+        ...payload,
+        performance: payload.performance
+          ? {
+              ...payload.performance,
+              avgRating: payload.performance.avgRating ?? avgRating,
+              totalRatings: payload.performance.totalRatings ?? vals.length,
+            }
+          : payload.performance,
       };
     },
     staleTime: 30_000,

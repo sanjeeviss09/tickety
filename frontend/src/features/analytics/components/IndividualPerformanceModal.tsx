@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import api from '../../../lib/api';
+import { supabase } from '../../../lib/supabase';
 import {
   Dialog,
   DialogContent,
@@ -38,6 +39,7 @@ import {
   Building2,
   Mail,
   Zap,
+  Star,
 } from 'lucide-react';
 
 interface IndividualPerformanceModalProps {
@@ -59,11 +61,54 @@ export function IndividualPerformanceModal({
     queryKey: ['individual-technician-performance', technicianId],
     queryFn: async () => {
       if (!technicianId) return null;
-      const res = await api.get(`/analytics/technician-performance/${technicianId}`);
-      return res.data?.data;
+      const [res, ratingsRes] = await Promise.all([
+        api.get(`/analytics/technician-performance/${technicianId}`),
+        supabase
+          .from('ticket_ratings')
+          .select('ticket_id, rating, feedback_comment, submitted_at')
+          .eq('technician_id', technicianId)
+          .order('submitted_at', { ascending: true }),
+      ]);
+      const payload = res.data?.data;
+      if (!payload) return null;
+
+      const ratingsByTicket = new Map<string, any>();
+      (ratingsRes.data ?? []).forEach((r: any) => {
+        if (r.ticket_id) ratingsByTicket.set(r.ticket_id, r);
+      });
+
+      const tickets = (payload.tickets || []).map((t: any) => {
+        const fallback = ratingsByTicket.get(t.id);
+        return {
+          ...t,
+          rating: t.rating ?? (fallback?.rating !== undefined ? Number(fallback.rating) : null),
+          rating_feedback: t.rating_feedback ?? fallback?.feedback_comment ?? null,
+          rated_at: t.rated_at ?? fallback?.submitted_at ?? null,
+        };
+      });
+
+      const ratedValues = tickets
+        .map((t: any) => t.rating)
+        .filter((v: any): v is number => typeof v === 'number' && !isNaN(v) && v >= 1 && v <= 5);
+      const totalRatings = ratedValues.length;
+      const avgRating = totalRatings > 0
+        ? Math.round((ratedValues.reduce((sum: number, r: number) => sum + r, 0) / totalRatings) * 10) / 10
+        : null;
+
+      return {
+        ...payload,
+        tickets,
+        metrics: payload.metrics
+          ? {
+              ...payload.metrics,
+              avgRating: payload.metrics.avgRating ?? avgRating,
+              totalRatings: payload.metrics.totalRatings ?? totalRatings,
+            }
+          : payload.metrics,
+      };
     },
     enabled: open && !!technicianId,
-    staleTime: 60_000,
+    staleTime: 30_000,
   });
 
   const profile = data?.profile;
@@ -101,6 +146,8 @@ export function IndividualPerformanceModal({
       'Time Taken (Hours)',
       'Time Taken (Formatted)',
       'SLA Status',
+      'Employee Rating',
+      'Employee Feedback',
     ];
     const rows = filteredTickets.map((t: any) => [
       `"${t.ticket_number || ''}"`,
@@ -114,6 +161,8 @@ export function IndividualPerformanceModal({
       t.duration_hours ?? '',
       `"${t.duration_formatted || ''}"`,
       `"${t.sla_status || ''}"`,
+      t.rating ? `${t.rating}/5` : '',
+      `"${(t.rating_feedback || '').replace(/"/g, '""')}"`,
     ]);
     const csvContent = [headers.join(','), ...rows.map((r: any[]) => r.join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -141,11 +190,20 @@ export function IndividualPerformanceModal({
                 </AvatarFallback>
               </Avatar>
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <DialogTitle className="text-xl font-bold">{profile?.full_name || 'Technician Performance'}</DialogTitle>
                   <Badge variant="outline" className="text-xs bg-background">
                     {profile?.employee_id || 'Technician'}
                   </Badge>
+                  {metrics?.avgRating !== null && metrics?.avgRating !== undefined && (
+                    <Badge variant="outline" className="text-xs bg-amber-50 text-amber-800 border-amber-300 font-semibold flex items-center gap-1">
+                      <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-500" />
+                      {metrics.avgRating} / 5
+                      <span className="text-[10px] font-normal text-amber-700">
+                        ({metrics.totalRatings} {metrics.totalRatings === 1 ? 'rating' : 'ratings'})
+                      </span>
+                    </Badge>
+                  )}
                 </div>
                 <DialogDescription className="text-xs text-muted-foreground flex flex-wrap items-center gap-2 mt-1">
                   <span className="flex items-center gap-1">
@@ -179,7 +237,7 @@ export function IndividualPerformanceModal({
 
           {/* KPI Strip */}
           {metrics && (
-            <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5 mt-4 pt-3 border-t">
+            <div className="grid grid-cols-2 sm:grid-cols-7 gap-2.5 mt-4 pt-3 border-t">
               <div className="p-2.5 rounded-lg bg-card border shadow-xs text-center">
                 <span className="text-[11px] text-muted-foreground uppercase font-medium flex items-center justify-center gap-1">
                   <Ticket className="h-3 w-3 text-primary" /> Assigned
@@ -228,6 +286,25 @@ export function IndividualPerformanceModal({
                   {metrics.slaCompliance}%
                 </p>
                 <span className="text-[10px] text-muted-foreground">{metrics.compliantCount} ok / {metrics.breachedCount} breach</span>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-amber-50/40 border border-amber-200/80 shadow-xs text-center">
+                <span className="text-[11px] text-amber-800 uppercase font-medium flex items-center justify-center gap-1">
+                  <Star className="h-3 w-3 fill-amber-400 text-amber-500" /> Rating
+                </span>
+                <p className="text-lg font-bold text-amber-600 mt-0.5 flex items-center justify-center gap-1">
+                  {metrics.avgRating !== null && metrics.avgRating !== undefined ? (
+                    <>
+                      {metrics.avgRating}
+                      <span className="text-xs font-normal text-muted-foreground">/5</span>
+                    </>
+                  ) : (
+                    '—'
+                  )}
+                </p>
+                <span className="text-[10px] text-muted-foreground">
+                  {metrics.totalRatings ? `${metrics.totalRatings} employee rating${metrics.totalRatings === 1 ? '' : 's'}` : 'No ratings yet'}
+                </span>
               </div>
             </div>
           )}
@@ -304,6 +381,7 @@ export function IndividualPerformanceModal({
                     <th className="px-4 py-2.5">Subject & Category</th>
                     <th className="px-3 py-2.5 whitespace-nowrap">Status</th>
                     <th className="px-3 py-2.5 whitespace-nowrap">Timeline</th>
+                    <th className="px-3 py-2.5 whitespace-nowrap">Employee Rating</th>
                     <th className="px-4 py-2.5 text-right whitespace-nowrap">Time Taken / SLA</th>
                   </tr>
                 </thead>
@@ -352,6 +430,36 @@ export function IndividualPerformanceModal({
                             <span className="text-muted-foreground/60">Resolved:</span>{' '}
                             {new Date(t.resolved_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
                           </div>
+                        )}
+                      </td>
+
+                      {/* Employee Rating */}
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {t.rating ? (
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-1">
+                              <div className="flex items-center">
+                                {[1, 2, 3, 4, 5].map((star) => (
+                                  <Star
+                                    key={star}
+                                    className={`h-3.5 w-3.5 ${
+                                      star <= t.rating
+                                        ? 'fill-amber-400 text-amber-500'
+                                        : 'text-slate-200 dark:text-slate-700'
+                                    }`}
+                                  />
+                                ))}
+                              </div>
+                              <span className="text-xs font-bold text-amber-700 ml-1">{t.rating}/5</span>
+                            </div>
+                            {t.rating_feedback && (
+                              <p className="text-[10px] text-muted-foreground italic max-w-[160px] truncate" title={t.rating_feedback}>
+                                "{t.rating_feedback}"
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
                         )}
                       </td>
 

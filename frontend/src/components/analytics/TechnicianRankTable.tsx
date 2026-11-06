@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabase';
 import { Badge } from '@/components/ui/badge';
-import { Trophy, Clock, ChevronRight, User } from 'lucide-react';
+import { Trophy, Clock, ChevronRight, User, Star } from 'lucide-react';
 import { IndividualPerformanceModal } from '@/features/analytics/components/IndividualPerformanceModal';
 
 interface TechnicianRankTableProps {
@@ -13,6 +15,8 @@ interface TechnicianRankTableProps {
     pending: number;
     avgResolutionHours: number;
     slaCompliance: number;
+    avgRating?: number | null;
+    totalRatings?: number;
   }[];
   loading?: boolean;
   onSelectTechnician?: (technicianId: string) => void;
@@ -27,6 +31,44 @@ const getRankIcon = (index: number) => {
 
 export function TechnicianRankTable({ data, loading, onSelectTechnician }: TechnicianRankTableProps) {
   const [selectedTechId, setSelectedTechId] = useState<string | null>(null);
+
+  const { data: ratingsData = [] } = useQuery({
+    queryKey: ['all-technician-ratings'],
+    queryFn: async () => {
+      const { data: rows } = await supabase
+        .from('ticket_ratings')
+        .select('ticket_id, technician_id, rating, submitted_at')
+        .order('submitted_at', { ascending: true });
+      return rows ?? [];
+    },
+    staleTime: 30_000,
+  });
+
+  const enrichedData = useMemo(() => {
+    const byTechTicket = new Map<string, Map<string, number>>();
+    ratingsData.forEach((r: any) => {
+      if (!r.technician_id || !r.ticket_id) return;
+      const val = Number(r.rating);
+      if (isNaN(val) || val < 1 || val > 5) return;
+      if (!byTechTicket.has(r.technician_id)) {
+        byTechTicket.set(r.technician_id, new Map());
+      }
+      byTechTicket.get(r.technician_id)!.set(r.ticket_id, val);
+    });
+
+    return data.map((tech) => {
+      if (tech.avgRating !== undefined && tech.avgRating !== null) return tech;
+      const ticketMap = byTechTicket.get(tech.id);
+      if (!ticketMap || ticketMap.size === 0) return tech;
+      const vals = Array.from(ticketMap.values());
+      const avg = Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 10) / 10;
+      return {
+        ...tech,
+        avgRating: avg,
+        totalRatings: vals.length,
+      };
+    });
+  }, [data, ratingsData]);
 
   const handleRowClick = (techId: string) => {
     setSelectedTechId(techId);
@@ -62,12 +104,13 @@ export function TechnicianRankTable({ data, loading, onSelectTechnician }: Techn
                 <th className="text-right pb-3 pr-4">Resolved</th>
                 <th className="text-right pb-3 pr-4">Pending</th>
                 <th className="text-right pb-3 pr-4">Avg Time</th>
+                <th className="text-right pb-3 pr-4">Rating</th>
                 <th className="text-right pb-3 pr-3">SLA</th>
                 <th className="text-right pb-3 w-8"></th>
               </tr>
             </thead>
             <tbody>
-              {data.map((tech, index) => (
+              {enrichedData.map((tech, index) => (
                 <tr
                   key={tech.id}
                   onClick={() => handleRowClick(tech.id)}
@@ -90,6 +133,17 @@ export function TechnicianRankTable({ data, loading, onSelectTechnician }: Techn
                     <span className="flex items-center justify-end gap-1 text-xs">
                       <Clock className="h-3 w-3" />{tech.avgResolutionHours}h
                     </span>
+                  </td>
+                  <td className="py-3 pr-4 text-right">
+                    {tech.avgRating !== null && tech.avgRating !== undefined ? (
+                      <span className="inline-flex items-center justify-end gap-1 text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                        <Star className="h-3 w-3 fill-amber-400 text-amber-500" />
+                        {tech.avgRating}
+                        <span className="text-[10px] font-normal text-amber-600">({tech.totalRatings || 0})</span>
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </td>
                   <td className="py-3 pr-3 text-right">
                     <Badge variant={tech.slaCompliance >= 90 ? 'default' : tech.slaCompliance >= 75 ? 'secondary' : 'destructive'} className="text-xs">

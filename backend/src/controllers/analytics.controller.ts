@@ -255,7 +255,7 @@ export const getTechnicianPerformance = async (req: Request, res: Response) => {
 
     const { data: tickets, error } = await supabaseAdmin
       .from('tickets')
-      .select('assigned_to, status, priority, created_at, resolution_date, assignee:profiles!tickets_assigned_to_fkey(full_name, email_address)')
+      .select('id, assigned_to, status, priority, created_at, resolution_date, assignee:profiles!tickets_assigned_to_fkey(full_name, email_address), ratings:ticket_ratings(rating)')
       .not('assigned_to', 'is', null);
     if (error) throw error;
 
@@ -268,7 +268,13 @@ export const getTechnicianPerformance = async (req: Request, res: Response) => {
           id,
           name: (t.assignee as any)?.full_name || 'Unknown',
           email: (t.assignee as any)?.email_address || '',
-          assigned: 0, resolved: 0, pending: 0, totalResolutionHours: 0, slaCompliant: 0
+          assigned: 0,
+          resolved: 0,
+          pending: 0,
+          totalResolutionHours: 0,
+          slaCompliant: 0,
+          ratingSum: 0,
+          totalRatings: 0,
         };
       }
       techMap[id].assigned++;
@@ -282,15 +288,26 @@ export const getTechnicianPerformance = async (req: Request, res: Response) => {
       } else {
         techMap[id].pending++;
       }
+
+      const ticketRatings = Array.isArray((t as any).ratings) ? (t as any).ratings : [];
+      if (ticketRatings.length > 0) {
+        const latestRating = Number(ticketRatings[ticketRatings.length - 1]?.rating);
+        if (!isNaN(latestRating) && latestRating >= 1 && latestRating <= 5) {
+          techMap[id].ratingSum += latestRating;
+          techMap[id].totalRatings++;
+        }
+      }
     });
 
     const data = Object.values(techMap).map(tech => ({
       ...tech,
       avgResolutionHours: tech.resolved > 0 ? Math.round(tech.totalResolutionHours / tech.resolved * 10) / 10 : 0,
       slaCompliance: tech.resolved > 0 ? Math.round((tech.slaCompliant / tech.resolved) * 100) : 100,
+      avgRating: tech.totalRatings > 0 ? Math.round((tech.ratingSum / tech.totalRatings) * 10) / 10 : null,
+      totalRatings: tech.totalRatings,
     })).sort((a, b) => b.resolved - a.resolved);
 
-    setCache(cacheKey, data, 300);
+    setCache(cacheKey, data, 60);
     res.json({ status: 'success', data });
   } catch (error: any) {
     res.status(500).json({ status: 'error', message: error.message });
@@ -399,7 +416,7 @@ export const getTechnicianDashboard = async (req: Request, res: Response) => {
     // All assigned tickets for this technician
     const { data: tickets, error } = await supabaseAdmin
       .from('tickets')
-      .select('id, status, priority, due_date, created_at, resolution_date, assigned_at, updated_at')
+      .select('id, status, priority, due_date, created_at, resolution_date, assigned_at, updated_at, ratings:ticket_ratings(rating, feedback_comment, submitted_at)')
       .eq('assigned_to', techId);
 
     if (error) throw error;
@@ -487,6 +504,18 @@ export const getTechnicianDashboard = async (req: Request, res: Response) => {
       ...counts,
     }));
 
+    const ratedValues: number[] = [];
+    (tickets ?? []).forEach((t: any) => {
+      const tr = Array.isArray(t.ratings) ? t.ratings : [];
+      if (tr.length > 0) {
+        const val = Number(tr[tr.length - 1]?.rating);
+        if (!isNaN(val) && val >= 1 && val <= 5) ratedValues.push(val);
+      }
+    });
+    const avgRating = ratedValues.length > 0
+      ? Math.round((ratedValues.reduce((s, r) => s + r, 0) / ratedValues.length) * 10) / 10
+      : null;
+
     const performance = {
       totalAssigned: tickets?.length ?? 0,
       totalResolved: resolved.length,
@@ -495,6 +524,8 @@ export const getTechnicianDashboard = async (req: Request, res: Response) => {
       reopened: tickets?.filter(t => t.status === 'Reopened').length ?? 0,
       closed: tickets?.filter(t => t.status === 'Closed').length ?? 0,
       pendingActive: tickets?.filter(t => activeStatuses.includes(t.status)).length ?? 0,
+      avgRating,
+      totalRatings: ratedValues.length,
     };
 
     res.json({ status: 'success', data: { summary, performance, trend } });
@@ -694,7 +725,8 @@ export const getIndividualTechnicianPerformance = async (req: Request, res: Resp
         total_work_duration_seconds,
         ticket_categories (name),
         units (name),
-        departments (name)
+        departments (name),
+        ratings:ticket_ratings (rating, feedback_comment, submitted_at)
       `)
       .eq('assigned_to', techId)
       .order('created_at', { ascending: false });
@@ -707,7 +739,7 @@ export const getIndividualTechnicianPerformance = async (req: Request, res: Resp
 
     const resolved = allTickets.filter(t => ['Resolved', 'Closed'].includes(t.status));
 
-    // Enrich tickets with duration and SLA compliance
+    // Enrich tickets with duration, SLA compliance, and employee star rating
     const enrichedTickets = allTickets.map((t: any) => {
       const isCompleted = ['Resolved', 'Closed'].includes(t.status);
       const resolvedAt = t.resolution_date || t.closed_at || t.technician_completed_at || t.updated_at;
@@ -753,6 +785,12 @@ export const getIndividualTechnicianPerformance = async (req: Request, res: Resp
       const unitName = Array.isArray(t.units) ? t.units[0]?.name : t.units?.name;
       const deptName = Array.isArray(t.departments) ? t.departments[0]?.name : t.departments?.name;
 
+      const ticketRatings = Array.isArray(t.ratings) ? t.ratings : [];
+      const latestRatingObj = ticketRatings.length > 0 ? ticketRatings[ticketRatings.length - 1] : null;
+      const ratingValue = latestRatingObj?.rating !== undefined && latestRatingObj?.rating !== null
+        ? Number(latestRatingObj.rating)
+        : null;
+
       return {
         id: t.id,
         ticket_number: t.ticket_number,
@@ -769,6 +807,9 @@ export const getIndividualTechnicianPerformance = async (req: Request, res: Resp
         duration_formatted: durationFormatted,
         is_breached: isBreached,
         sla_status: slaStatus,
+        rating: !isNaN(ratingValue as number) ? ratingValue : null,
+        rating_feedback: latestRatingObj?.feedback_comment || null,
+        rated_at: latestRatingObj?.submitted_at || null,
       };
     });
 
@@ -788,6 +829,12 @@ export const getIndividualTechnicianPerformance = async (req: Request, res: Resp
     const resolvedWithSla = enrichedTickets.filter(t => ['Resolved', 'Closed'].includes(t.status) && t.due_date);
     const compliantCount = resolvedWithSla.filter(t => !t.is_breached).length;
     const slaCompliance = resolvedWithSla.length > 0 ? Math.round((compliantCount / resolvedWithSla.length) * 100) : 100;
+
+    const ratedTickets = enrichedTickets.filter(t => typeof t.rating === 'number' && t.rating >= 1 && t.rating <= 5);
+    const totalRatings = ratedTickets.length;
+    const avgRating = totalRatings > 0
+      ? Math.round((ratedTickets.reduce((sum, t) => sum + (t.rating as number), 0) / totalRatings) * 10) / 10
+      : null;
 
     // Status distribution
     const statusCounts: Record<string, number> = {};
@@ -818,6 +865,8 @@ export const getIndividualTechnicianPerformance = async (req: Request, res: Resp
           slaCompliance,
           compliantCount,
           breachedCount: resolvedWithSla.length - compliantCount,
+          avgRating,
+          totalRatings,
         },
         statusDistribution: Object.entries(statusCounts).map(([status, count]) => ({ status, count })),
         priorityDistribution: Object.entries(priorityCounts).map(([priority, count]) => ({ priority, count })),

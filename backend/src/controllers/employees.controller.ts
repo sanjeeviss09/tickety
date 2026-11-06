@@ -4,11 +4,22 @@ import { supabaseAdmin } from '../config/supabase';
 // Get all employees (Master Data)
 export const getEmployees = async (req: Request, res: Response) => {
   try {
-    const { data, error } = await supabaseAdmin
+    const { q, limit } = req.query;
+    let query = supabaseAdmin
       .from('profiles')
       .select('*, unit:units(id, name), department:departments(id, name), role:roles(id, name), manager:profiles!reporting_manager_id(id, full_name)')
       .order('full_name', { ascending: true });
 
+    if (q) {
+      const search = q as string;
+      query = query.or(`full_name.ilike.%${search}%,employee_id.ilike.%${search}%,email_address.ilike.%${search}%,designation.ilike.%${search}%`);
+    }
+
+    if (limit) {
+      query = query.limit(parseInt(limit as string));
+    }
+
+    const { data, error } = await query;
     if (error) throw error;
     res.json({ status: 'success', data });
   } catch (error: any) {
@@ -245,24 +256,42 @@ export const bulkImportEmployees = async (req: Request, res: Response) => {
     let failed = 0;
     const errors = [];
 
+    // Pre-fetch units and departments for resolving by name or ID
+    const { data: allUnits } = await supabaseAdmin.from('units').select('id, name');
+    const { data: allDepts } = await supabaseAdmin.from('departments').select('id, name');
+
     // 2. Process records
     for (const [index, record] of records.entries()) {
       try {
+        let resolvedUnitId = record.unit_id || null;
+        if (!resolvedUnitId && (record.unit || record.unit_name) && allUnits) {
+          const uName = String(record.unit || record.unit_name).trim().toLowerCase();
+          const found = allUnits.find(u => u.name.toLowerCase() === uName || u.id.toLowerCase() === uName);
+          if (found) resolvedUnitId = found.id;
+        }
+
+        let resolvedDeptId = record.department_id || null;
+        if (!resolvedDeptId && (record.department || record.department_name) && allDepts) {
+          const dName = String(record.department || record.department_name).trim().toLowerCase();
+          const found = allDepts.find(d => d.name.toLowerCase() === dName || d.id.toLowerCase() === dName);
+          if (found) resolvedDeptId = found.id;
+        }
+
         const { error: insertError } = await supabaseAdmin
           .from('profiles')
           .insert([{
             employee_id: record.employee_id,
             full_name: record.full_name,
-            email_address: record.email,
-            mobile_number: record.mobile,
+            email_address: record.email || record.email_address,
+            mobile_number: record.mobile || record.mobile_number,
             designation: record.designation,
-            unit_id: record.unit_id,
-            department_id: record.department_id,
+            unit_id: resolvedUnitId,
+            department_id: resolvedDeptId,
             location: record.location,
-            joining_date: record.joining_date,
+            joining_date: record.joining_date || null,
             employment_status: record.employment_status || 'Active',
-            reporting_manager_id: record.reporting_manager_id,
-            role_id: record.role_id,
+            reporting_manager_id: record.reporting_manager_id || null,
+            role_id: record.role_id || null,
             is_active: true,
             created_by: userId
           }]);

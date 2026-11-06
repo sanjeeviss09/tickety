@@ -6,11 +6,13 @@ interface TicketState {
   tickets: any[];
   categories: any[];
   loading: boolean;
+  error: string | null;
   filters: any;
   fetchTickets: (filters?: any) => Promise<void>;
   fetchCategories: () => Promise<void>;
   subscribeToTickets: (_userId: string, _role: string) => void;
   unsubscribeFromTickets: () => void;
+  deleteTicket: (id: string) => Promise<void>;
 }
 
 let subscription: any = null;
@@ -19,10 +21,11 @@ export const useTicketStore = create<TicketState>((set, get) => ({
   tickets: [],
   categories: [],
   loading: false,
+  error: null,
   filters: {},
   
   fetchTickets: async (filters = {}) => {
-    set({ loading: true, filters });
+    set({ loading: true, error: null, filters });
     try {
       const params = new URLSearchParams();
       if (filters.status) params.append('status', filters.status);
@@ -32,10 +35,23 @@ export const useTicketStore = create<TicketState>((set, get) => ({
       if (response.data.status === 'success') {
         set({ tickets: response.data.data });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching tickets:', error);
+      set({ error: error.response?.data?.message || error.message || 'Failed to fetch tickets' });
     } finally {
       set({ loading: false });
+    }
+  },
+
+  deleteTicket: async (id: string) => {
+    try {
+      const response = await api.delete(`/tickets/${id}`);
+      if (response.data.status === 'success') {
+        set(state => ({ tickets: state.tickets.filter(t => t.id !== id) }));
+      }
+    } catch (error) {
+      console.error('Error deleting ticket:', error);
+      throw error;
     }
   },
 

@@ -9,8 +9,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, Search, Download } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import html2canvas from 'html2canvas';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-
 export function AssetList() {
   const { assets, loading, fetchAssets } = useAssetStore();
   const { profile } = useAuthStore();
@@ -78,8 +81,8 @@ export function AssetList() {
     return matchesSearch && matchesStatus && matchesCondition && matchesWarranty;
   });
 
-  const handleExport = () => {
-    const exportData = filteredAssets.map((a: any) => ({
+  const getExportData = () => {
+    return filteredAssets.map((a: any) => ({
       'Asset Code': a.asset_code,
       'Name': a.name,
       'Category': a.category?.name,
@@ -88,19 +91,54 @@ export function AssetList() {
       'Serial Number': a.serial_number,
       'Status': a.status,
       'Condition': a.condition,
-      'Assigned To': a.assigned_employee?.full_name || 'Unassigned',
-      'Department': a.department?.name || '',
-      'Unit': a.unit?.name || '',
+      'Assigned To': a.assigned_employee?.full_name || a.assignments?.[0]?.assigned_user?.full_name || 'Unassigned',
+      'Department': a.department?.name || a.department || '',
+      'Unit': a.unit?.name || a.unit || '',
       'Location': a.location || '',
       'Purchase Date': a.purchase_date,
       'Purchase Cost': a.purchase_cost,
-      'Warranty Expiry': a.warranty_expiry_date
+      'Warranty': a.warranty || a.warranty_expiry_date || '',
+      'Port Number': a.port_number || ''
     }));
+  };
 
+  const handleExportExcel = () => {
+    const exportData = getExportData();
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Assets');
     XLSX.writeFile(wb, 'DeskPulse_Assets_Export.xlsx');
+  };
+
+  const handleExportPDF = () => {
+    const doc = new jsPDF('landscape');
+    const exportData = getExportData();
+    if (exportData.length === 0) return;
+    
+    const head = [Object.keys(exportData[0])];
+    const body = exportData.map(obj => Object.values(obj).map(v => v ? String(v) : ''));
+    
+    autoTable(doc, {
+      head: head,
+      body: body,
+      theme: 'grid',
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [41, 128, 185] },
+    });
+    
+    doc.save('DeskPulse_Assets_Export.pdf');
+  };
+
+  const handleExportImage = () => {
+    const tableElement = document.getElementById('asset-inventory-table');
+    if (tableElement) {
+      html2canvas(tableElement).then((canvas) => {
+        const link = document.createElement('a');
+        link.download = 'DeskPulse_Assets_Export.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      });
+    }
   };
 
   return (
@@ -108,9 +146,18 @@ export function AssetList() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold tracking-tight">Assets</h1>
         <div className="flex items-center space-x-2">
-          <Button variant="outline" onClick={handleExport}>
-            <Download className="mr-2 h-4 w-4" /> Export
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <Download className="mr-2 h-4 w-4" /> Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleExportExcel}>Export as Excel</DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportPDF}>Export as PDF</DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportImage}>Export as Image</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {(profile?.roles?.name === 'Admin' || profile?.roles?.name === 'Technician') && (
             <Button asChild>
               <Link to="/assets/new">
@@ -174,7 +221,7 @@ export function AssetList() {
         </CardHeader>
         <CardContent className="p-0">
           <div className="relative overflow-x-auto">
-            <Table>
+            <Table id="asset-inventory-table">
               <TableHeader className="bg-muted/50">
                 <TableRow>
                   <TableHead className="w-[120px]">Asset Code</TableHead>

@@ -34,7 +34,7 @@ export function AddEmployeeModal({ isOpen, onClose, defaultRoleName = 'Employee'
     queryKey: ['roles'],
     queryFn: async () => {
       const { data } = await supabase.from('roles').select('*').order('name');
-      return data || [];
+      return (data || []).filter(r => r.name !== 'Assigner');
     }
   });
 
@@ -143,71 +143,64 @@ export function AddEmployeeModal({ isOpen, onClose, defaultRoleName = 'Employee'
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{employeeToEdit ? 'Edit' : 'Add New'} {employeeToEdit ? (employeeToEdit.role?.name || 'Employee') : defaultRoleName}</DialogTitle>
-          <DialogDescription>
+      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col p-5">
+        <DialogHeader className="pb-2 border-b">
+          <DialogTitle className="text-base font-bold">{employeeToEdit ? 'Edit' : 'Add New'} {employeeToEdit ? (employeeToEdit.role?.name || 'Employee') : defaultRoleName}</DialogTitle>
+          <DialogDescription className="text-xs">
             {employeeToEdit ? 'Update employee profile details.' : 'Directly add a new staff member or technician without needing to upload files.'}
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4 mt-2">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Employee ID *</Label>
+        <form onSubmit={handleSubmit} className="space-y-3.5 mt-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {/* Row 1 */}
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Employee ID *</Label>
               <Input
                 required
+                className="h-8.5 text-xs"
                 placeholder="e.g. EMP-101"
                 value={formData.employee_id}
                 onChange={e => setFormData({ ...formData, employee_id: e.target.value })}
               />
             </div>
-            <div className="space-y-2">
-              <Label>Full Name *</Label>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Full Name *</Label>
               <Input
                 required
+                className="h-8.5 text-xs"
                 placeholder="e.g. Jane Doe"
                 value={formData.full_name}
                 onChange={e => setFormData({ ...formData, full_name: e.target.value })}
               />
             </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Email Address *</Label>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Email Address *</Label>
               <Input
                 type="email"
                 required
+                className="h-8.5 text-xs"
                 disabled={!!employeeToEdit}
                 placeholder="jane@company.com"
                 value={formData.email_address}
                 onChange={e => setFormData({ ...formData, email_address: e.target.value })}
               />
             </div>
-            <div className="space-y-2">
-              <Label>Mobile Number</Label>
+
+            {/* Row 2 */}
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Mobile Number</Label>
               <Input
+                className="h-8.5 text-xs"
                 placeholder="+1 555 0192"
                 value={formData.mobile_number}
                 onChange={e => setFormData({ ...formData, mobile_number: e.target.value })}
               />
             </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Designation</Label>
-              <Input
-                placeholder="e.g. IT Specialist / Engineer"
-                value={formData.designation}
-                onChange={e => setFormData({ ...formData, designation: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>System Role *</Label>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">System Role *</Label>
               <Select value={formData.role_id || undefined} onValueChange={val => setFormData({ ...formData, role_id: val })}>
-                <SelectTrigger><SelectValue placeholder="Select Role" /></SelectTrigger>
+                <SelectTrigger className="h-8.5 text-xs"><SelectValue placeholder="Select Role" /></SelectTrigger>
                 <SelectContent>
                   {roles.length === 0 ? (
                     <SelectItem value="none" disabled>No roles found</SelectItem>
@@ -219,13 +212,21 @@ export function AddEmployeeModal({ isOpen, onClose, defaultRoleName = 'Employee'
                 </SelectContent>
               </Select>
             </div>
-          </div>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Designation</Label>
+              <Input
+                className="h-8.5 text-xs"
+                placeholder="e.g. IT Specialist / Engineer"
+                value={formData.designation}
+                onChange={e => setFormData({ ...formData, designation: e.target.value })}
+              />
+            </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Unit</Label>
+            {/* Row 3 */}
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Unit</Label>
               <Select value={formData.unit_id || undefined} onValueChange={val => setFormData({ ...formData, unit_id: val })}>
-                <SelectTrigger><SelectValue placeholder="Select Unit" /></SelectTrigger>
+                <SelectTrigger className="h-8.5 text-xs"><SelectValue placeholder="Select Unit" /></SelectTrigger>
                 <SelectContent>
                   {units.length === 0 ? (
                     <SelectItem value="none" disabled>No units found</SelectItem>
@@ -237,10 +238,10 @@ export function AddEmployeeModal({ isOpen, onClose, defaultRoleName = 'Employee'
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label>Department</Label>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Department</Label>
               <Select value={formData.department_id || undefined} onValueChange={val => setFormData({ ...formData, department_id: val })}>
-                <SelectTrigger><SelectValue placeholder="Select Department" /></SelectTrigger>
+                <SelectTrigger className="h-8.5 text-xs"><SelectValue placeholder="Select Department" /></SelectTrigger>
                 <SelectContent>
                   {departments.length === 0 ? (
                     <SelectItem value="none" disabled>No departments found</SelectItem>
@@ -252,23 +253,22 @@ export function AddEmployeeModal({ isOpen, onClose, defaultRoleName = 'Employee'
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Employment Status</Label>
+              <Select value={formData.employment_status} onValueChange={val => setFormData({ ...formData, employment_status: val })}>
+                <SelectTrigger className="h-8.5 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Active">Active</SelectItem>
+                  <SelectItem value="Inactive">Inactive</SelectItem>
+                  <SelectItem value="Suspended">Suspended</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>Employment Status</Label>
-            <Select value={formData.employment_status} onValueChange={val => setFormData({ ...formData, employment_status: val })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Active">Active</SelectItem>
-                <SelectItem value="Inactive">Inactive</SelectItem>
-                <SelectItem value="Suspended">Suspended</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="pt-4 flex justify-end space-x-2 border-t">
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={saveMutation.isPending}>
+          <div className="pt-3 flex justify-end space-x-2 border-t">
+            <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={onClose}>Cancel</Button>
+            <Button type="submit" size="sm" className="h-8 text-xs" disabled={saveMutation.isPending}>
               {saveMutation.isPending ? 'Saving...' : (employeeToEdit ? 'Save Changes' : `Save ${defaultRoleName}`)}
             </Button>
           </div>

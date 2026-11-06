@@ -323,7 +323,7 @@ export function RoutingSettings() {
                 onChange={e => setAssignmentForm({ ...assignmentForm, technician_id: e.target.value })}
               >
                 <option value="">Select Technician...</option>
-                {employees?.map((emp: any) => (
+                {employees?.filter((emp: any) => emp.role?.name === 'Technician' || emp.role?.name === 'Admin').map((emp: any) => (
                   <option key={emp.id} value={emp.id}>
                     {emp.full_name} ({emp.email_address})
                   </option>
@@ -446,7 +446,7 @@ export function RoutingSettings() {
                 onChange={e => setRuleForm({ ...ruleForm, technician_id: e.target.value })}
               >
                 <option value="">Select Technician...</option>
-                {employees?.map((emp: any) => (
+                {employees?.filter((emp: any) => emp.role?.name === 'Technician' || emp.role?.name === 'Admin').map((emp: any) => (
                   <option key={emp.id} value={emp.id}>
                     {emp.full_name} ({emp.email_address})
                   </option>

@@ -18,6 +18,9 @@ const createAssetSchema = z.object({
   department: z.string().optional(),
   location: z.string().optional(),
   notes: z.string().optional(),
+  assigned_to: z.string().uuid().optional(),
+  warranty: z.string().optional(),
+  port_number: z.string().optional(),
 });
 
 export const getCategories = async (req: Request, res: Response) => {
@@ -41,17 +44,63 @@ export const createAsset = async (req: Request, res: Response) => {
     }
 
     const validatedData = createAssetSchema.parse(req.body);
+    const { assigned_to, ...assetData } = validatedData;
+
+    let finalAssignee = assigned_to;
+
+    // If not assigned to an employee but it has a unit, automatically assign to a unit technician
+    if (!finalAssignee && assetData.unit) {
+      // Find a technician in this unit
+      // First, try to see if the creator is a technician in this unit
+      const { data: creatorProfile } = await supabaseAdmin
+        .from('profiles')
+        .select('id, unit:units!inner(name), role:roles!inner(name)')
+        .eq('id', userId)
+        .single();
+      
+      const roleObj: any = creatorProfile?.role;
+      const unitObj: any = creatorProfile?.unit;
+      if (creatorProfile && roleObj?.name === 'Technician' && unitObj?.name === assetData.unit) {
+        finalAssignee = userId;
+      } else {
+        // Find first available technician in this unit
+        const { data: techs } = await supabaseAdmin
+          .from('profiles')
+          .select('id, role:roles!inner(name), unit:units!inner(name)')
+          .eq('roles.name', 'Technician')
+          .eq('units.name', assetData.unit)
+          .limit(1);
+          
+        if (techs && techs.length > 0) {
+          finalAssignee = techs[0].id;
+        }
+      }
+    }
+
+    if (finalAssignee) {
+      assetData.status = 'Assigned';
+    }
 
     const { data: asset, error } = await supabaseAdmin
       .from('assets')
       .insert([{
-        ...validatedData,
+        ...assetData,
         created_by: userId,
       }])
       .select()
       .single();
 
     if (error) throw error;
+
+    if (finalAssignee) {
+      await supabaseAdmin.from('asset_assignments').insert([{
+        asset_id: asset.id,
+        assigned_to: finalAssignee,
+        assigned_by: userId,
+        status: 'Active',
+        remarks: assigned_to ? 'Assigned during creation' : 'Auto-assigned to unit technician'
+      }]);
+    }
 
     // Log history
     await supabaseAdmin.from('asset_history').insert([{
@@ -78,7 +127,7 @@ export const getAssets = async (req: Request, res: Response) => {
       .select(`
         *,
         asset_categories (name),
-        assignments:asset_assignments (assigned_to, assigned_user:profiles!asset_assignments_assigned_to_fkey(full_name))
+        assignments:asset_assignments (assigned_to, is_default, assigned_user:profiles!asset_assignments_assigned_to_fkey(full_name))
       `);
       
     // Apply role restrictions
@@ -101,11 +150,11 @@ export const getAssets = async (req: Request, res: Response) => {
     if (error) throw error;
     
     // For Employee or when assigned_to filter is used, we need to filter out assets that were returned by inner join simulation since supabase deep filtering might return the parent row with empty assignments.
-    let filteredData = data;
+    let filteredData = Array.isArray(data) ? data : [];
     if (role === 'Employee') {
-      filteredData = data.filter((a: any) => a.assignments && a.assignments.some((ass: any) => ass.assigned_to === userId));
+      filteredData = filteredData.filter((a: any) => a.assignments && a.assignments.some((ass: any) => ass.assigned_to === userId));
     } else if (req.query.assigned_to) {
-      filteredData = data.filter((a: any) => a.assignments && a.assignments.some((ass: any) => ass.assigned_to === req.query.assigned_to));
+      filteredData = filteredData.filter((a: any) => a.assignments && a.assignments.some((ass: any) => ass.assigned_to === req.query.assigned_to));
     }
 
     res.json({ status: 'success', data: filteredData });
@@ -261,10 +310,33 @@ export const bulkImportAssets = async (req: Request, res: Response) => {
     let failed = 0;
     const errors = [];
 
+    // Pre-fetch profiles for resolving assigned employee
+    const { data: allProfiles } = await supabaseAdmin
+      .from('profiles')
+      .select('id, employee_id, full_name, email_address, unit:units(name), department:departments(name)');
+
     // 2. Process records
     for (const [index, record] of records.entries()) {
       try {
-        const { error: insertError } = await supabaseAdmin
+        let matchedEmp: any = null;
+        const empIdentifier = String(record.assigned_employee_id || record.employee_id || record.assigned_to || '').trim().toLowerCase();
+        if (empIdentifier && allProfiles) {
+          matchedEmp = allProfiles.find((p: any) => 
+            (p.employee_id && p.employee_id.toLowerCase() === empIdentifier) ||
+            (p.id && p.id.toLowerCase() === empIdentifier) ||
+            (p.email_address && p.email_address.toLowerCase() === empIdentifier)
+          );
+        }
+
+        // If employee is matched, auto-fill unit and department if not already set
+        const finalUnit = record.unit || (matchedEmp?.unit?.name ?? null);
+        const finalDepartment = record.department || (matchedEmp?.department?.name ?? null);
+        let finalStatus = record.status || (matchedEmp ? 'Assigned' : 'Available');
+        if (matchedEmp && (!record.status || record.status === 'Available')) {
+          finalStatus = 'Assigned';
+        }
+
+        const { data: insertedAsset, error: insertError } = await supabaseAdmin
           .from('assets')
           .insert([{
             asset_code: record.asset_code,
@@ -276,17 +348,31 @@ export const bulkImportAssets = async (req: Request, res: Response) => {
             purchase_date: record.purchase_date || null,
             purchase_cost: record.purchase_cost || null,
             vendor: record.vendor,
-            status: record.status || 'Available',
+            status: finalStatus,
             condition: record.condition || 'Good',
-            unit: record.unit,
-            department: record.department,
+            unit: finalUnit,
+            department: finalDepartment,
             location: record.location,
             created_by: (req as any).user?.id
-          }]);
+          }])
+          .select()
+          .single();
 
         if (insertError) {
           throw insertError;
         }
+
+        // Create assignment record if assigned employee was provided
+        if (matchedEmp && insertedAsset) {
+          await supabaseAdmin.from('asset_assignments').insert([{
+            asset_id: insertedAsset.id,
+            assigned_to: matchedEmp.id,
+            assigned_by: (req as any).user?.id,
+            status: 'Active',
+            remarks: 'Assigned during bulk import'
+          }]);
+        }
+
         successful++;
       } catch (err: any) {
         failed++;

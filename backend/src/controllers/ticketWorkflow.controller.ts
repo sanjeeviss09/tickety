@@ -46,7 +46,7 @@ export const startWork = async (req: Request, res: Response) => {
 
     if (ticketErr || !ticket) return res.status(404).json({ status: 'error', message: 'Ticket not found' });
     if (ticket.assigned_to !== profileId) return res.status(403).json({ status: 'error', message: 'You are not the assigned technician' });
-    if (!['Assigned', 'Reopened'].includes(ticket.status)) {
+    if (!['Assigned', 'Reopened', 'Accepted'].includes(ticket.status)) {
       return res.status(400).json({ status: 'error', message: `Cannot start work on a ticket with status "${ticket.status}"` });
     }
     if (ticket.active_work_session_id) {
@@ -252,6 +252,168 @@ export const completeWork = async (req: Request, res: Response) => {
     res.status(500).json({ status: 'error', message: error.message });
   }
 };
+
+// â”€â”€â”€// ─── POST /tickets/:id/wait-for-user ─────────────────────────────────────────
+export const waitForUser = async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    const caller = await getCallerProfile(req);
+    if (!caller) return res.status(401).json({ status: 'error', message: 'Unauthorized' });
+    const { profileId, authId } = caller;
+
+    const { data: ticket } = await supabaseAdmin
+      .from('tickets')
+      .select('*, creator:profiles!tickets_created_by_fkey(id, full_name, email_address), assignee:profiles!tickets_assigned_to_fkey(id, full_name)')
+      .eq('id', id).single();
+
+    if (!ticket) return res.status(404).json({ status: 'error', message: 'Ticket not found' });
+    if (ticket.assigned_to !== profileId) return res.status(403).json({ status: 'error', message: 'Not the assigned technician' });
+    if (ticket.status !== 'In Progress') return res.status(400).json({ status: 'error', message: `Ticket must be "In Progress" to wait for user.` });
+
+    const now = new Date().toISOString();
+
+    // End active work session
+    if (ticket.active_work_session_id) {
+      const { data: session } = await supabaseAdmin
+        .from('ticket_work_sessions').select('started_at').eq('id', ticket.active_work_session_id).single();
+      if (session) {
+        const durationSeconds = Math.floor((new Date(now).getTime() - new Date(session.started_at).getTime()) / 1000);
+        await supabaseAdmin.from('ticket_work_sessions').update({
+          ended_at: now,
+          duration_seconds: durationSeconds,
+        }).eq('id', ticket.active_work_session_id);
+      }
+    }
+
+    // Pause SLA
+    await handleSlaStatusTransition(id, ticket.status, 'Waiting for User', profileId);
+
+    // Update ticket
+    await supabaseAdmin.from('tickets').update({
+      status: 'Waiting for User',
+      active_work_session_id: null,
+    }).eq('id', id);
+
+    // Timeline
+    await supabaseAdmin.from('ticket_timeline').insert([{
+      ticket_id: id, user_id: profileId,
+      action_type: 'STATUS_CHANGE',
+      message: 'Technician is waiting for user response',
+      metadata: { old_status: ticket.status, new_status: 'Waiting for User' },
+    }]);
+
+    await supabaseAdmin.from('audit_logs').insert([{
+      user_id: authId, action: 'TICKET_STATUS_CHANGED', entity_type: 'ticket', entity_id: id,
+      new_values: { status: 'Waiting for User' },
+    }]);
+
+    // Notify employee
+    if (ticket.creator?.id) {
+      await notifyAndEmail({
+        recipientProfileId: ticket.creator.id as string,
+        eventName: 'Waiting for User',
+        templateVars: {
+          ticket_number: ticket.ticket_number,
+          subject: ticket.subject,
+          technician_name: (ticket.assignee as any)?.full_name || 'Technician',
+          ticket_url: ticketUrl(id),
+          company_name: 'DeskPulse',
+        },
+        link: `/tickets/${id}`,
+      }).catch(() => {});
+    }
+
+    res.json({ status: 'success', data: { status: 'Waiting for User' } });
+  } catch (error: any) {
+    console.error('[waitForUser]', error);
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+};
+
+// ─── POST /tickets/:id/employee-reply ────────────────────────────────────────
+const replySchema = z.object({ comment: z.string().min(1, 'Reply comment is required') });
+
+export const employeeReply = async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    const caller = await getCallerProfile(req);
+    if (!caller) return res.status(401).json({ status: 'error', message: 'Unauthorized' });
+    const { profileId, authId } = caller;
+
+    const { data: ticket } = await supabaseAdmin
+      .from('tickets')
+      .select('*, creator:profiles!tickets_created_by_fkey(id, full_name), assignee:profiles!tickets_assigned_to_fkey(id, full_name, email_address)')
+      .eq('id', id).single();
+
+    if (!ticket) return res.status(404).json({ status: 'error', message: 'Ticket not found' });
+    if (ticket.created_by !== profileId) return res.status(403).json({ status: 'error', message: 'Only the ticket creator can reply' });
+    if (ticket.status !== 'Waiting for User') return res.status(400).json({ status: 'error', message: `Ticket is not waiting for user.` });
+
+    const validated = replySchema.parse(req.body);
+    const now = new Date().toISOString();
+
+    // Add comment
+    const { data: comment } = await supabaseAdmin.from('ticket_comments').insert([{
+      ticket_id: id, author_id: profileId, content: validated.comment, is_internal: false
+    }]).select().single();
+
+    // Create new work session
+    const { data: session } = await supabaseAdmin.from('ticket_work_sessions').insert([{
+      ticket_id: id, technician_id: ticket.assigned_to, session_type: 'resumed', started_at: now
+    }]).select().single();
+
+    // Resume SLA
+    await handleSlaStatusTransition(id, ticket.status, 'In Progress', profileId);
+
+    // Update ticket
+    await supabaseAdmin.from('tickets').update({
+      status: 'In Progress',
+      active_work_session_id: session?.id || null,
+    }).eq('id', id);
+
+    // Timeline
+    await supabaseAdmin.from('ticket_timeline').insert([{
+      ticket_id: id, user_id: profileId,
+      action_type: 'COMMENT',
+      message: 'Employee replied to technician',
+      metadata: { comment_id: comment?.id },
+    }, {
+      ticket_id: id, user_id: profileId,
+      action_type: 'STATUS_CHANGE',
+      message: 'Status automatically changed to In Progress after employee reply',
+      metadata: { old_status: ticket.status, new_status: 'In Progress' },
+    }]);
+
+    await supabaseAdmin.from('audit_logs').insert([{
+      user_id: authId, action: 'TICKET_STATUS_CHANGED', entity_type: 'ticket', entity_id: id,
+      new_values: { status: 'In Progress' },
+    }]);
+
+    // Notify technician
+    if (ticket.assignee?.id) {
+      await notifyAndEmail({
+        recipientProfileId: ticket.assignee.id as string,
+        eventName: 'Employee Replied',
+        templateVars: {
+          ticket_number: ticket.ticket_number,
+          subject: ticket.subject,
+          employee_name: ticket.creator.full_name || 'Employee',
+          comment: validated.comment,
+          ticket_url: ticketUrl(id),
+          company_name: 'DeskPulse',
+        },
+        link: `/tickets/${id}`,
+      }).catch(() => {});
+    }
+
+    res.json({ status: 'success', data: { status: 'In Progress' } });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) return res.status(400).json({ status: 'error', message: error.issues.map(i => i.message).join(', ') });
+    console.error('[employeeReply]', error);
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+};
+
 
 // â”€â”€â”€ POST /tickets/:id/confirm-resolution â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const confirmSchema = z.object({

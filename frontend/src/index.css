@@ -74,3 +74,64 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Hide number input spinner / scroll buttons */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* Invisible scrolling: hide scrollbars globally while keeping full scroll functionality */
+html,
+body,
+#root,
+div,
+main,
+section,
+article,
+aside,
+nav,
+* {
+  scrollbar-width: none !important; /* Firefox and modern Chromium */
+  -ms-overflow-style: none !important; /* IE and legacy Edge */
+}
+
+::-webkit-scrollbar {
+  display: none !important;
+  width: 0px !important;
+  height: 0px !important;
+  background: transparent !important;
+}
+
+::-webkit-scrollbar-thumb {
+  display: none !important;
+  background: transparent !important;
+}
+
+::-webkit-scrollbar-track {
+  display: none !important;
+  background: transparent !important;
+}
+
+::-webkit-scrollbar-corner {
+  display: none !important;
+  background: transparent !important;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.no-scrollbar {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+

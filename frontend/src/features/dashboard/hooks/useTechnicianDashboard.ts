@@ -129,7 +129,7 @@ export function useTodaysWork() {
     queryKey: ['tech-todays-work', techId],
     queryFn: async () => {
       if (!techId) return [];
-      const activeStatuses = ['Open', 'Assigned', 'Accepted', 'In Progress', 'Waiting for User', 'Reopened'];
+      const activeStatuses = ['Open', 'Assigned', 'In Progress', 'Waiting for User', 'Reopened'];
 
       const { data, error } = await supabase
         .from('tickets')
@@ -157,7 +157,7 @@ export function useSlaRiskTickets() {
     queryFn: async () => {
       if (!techId) return { breached: [], approaching: [], onTrack: [] };
 
-      const activeStatuses = ['Open', 'Assigned', 'Accepted', 'In Progress', 'Waiting for User', 'Reopened'];
+      const activeStatuses = ['Open', 'Assigned', 'In Progress', 'Waiting for User', 'Reopened'];
 
       const { data, error } = await supabase
         .from('tickets')
@@ -197,7 +197,7 @@ export function useCriticalTickets() {
     queryKey: ['tech-critical', techId],
     queryFn: async () => {
       if (!techId) return [];
-      const activeStatuses = ['Open', 'Assigned', 'Accepted', 'In Progress', 'Waiting for User', 'Reopened'];
+      const activeStatuses = ['Open', 'Assigned', 'In Progress', 'Waiting for User', 'Reopened'];
 
       const { data, error } = await supabase
         .from('tickets')

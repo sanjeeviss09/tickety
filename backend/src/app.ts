@@ -20,6 +20,11 @@ import employeesRoutes from './routes/employees.routes';
 import settingsRoutes from './routes/settings.routes';
 import publicRoutes from './routes/public.routes';
 import routingRoutes from './routes/routing.routes';
+import selfServiceRoutes from './routes/selfService.routes';
+import slaRoutes from './routes/sla.routes';
+import attendanceRoutes from './routes/attendance.routes';
+import workforceRoutes from './routes/workforce.routes';
+
 
 const app: Express = express();
 
@@ -81,6 +86,10 @@ const registerRoutes = (prefix: string) => {
   app.use(`${prefix}/settings`, settingsRoutes);
   app.use(`${prefix}/public`, publicRoutes);
   app.use(`${prefix}/routing`, routingRoutes);
+  app.use(`${prefix}/self-service`, selfServiceRoutes);
+  app.use(`${prefix}/sla`, slaRoutes);
+  app.use(`${prefix}/attendance`, attendanceRoutes);
+  app.use(`${prefix}/workforce`, workforceRoutes);
 };
 
 // Mount API routes

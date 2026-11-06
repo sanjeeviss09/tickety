@@ -1,4 +1,4 @@
-﻿/**
+/**
  * TicketDetail.tsx
  * Extended to support full technician workflow:
  * Assigned -> Start Work -> In Progress -> Mark as Completed -> Awaiting Employee Confirmation
@@ -18,24 +18,10 @@ import { Badge } from '@/components/ui/badge';
 import { supabase } from '../../../lib/supabase';
 import { useAuthStore } from '../../../store/authStore';
 import { cn } from '@/lib/utils';
-
-const STATUS_BG: Record<string, string> = {
-  'Open': 'bg-blue-100 text-blue-800',
-  'Assigned': 'bg-indigo-100 text-indigo-800',
-  'Accepted': 'bg-violet-100 text-violet-800',
-  'In Progress': 'bg-purple-100 text-purple-800',
-  'Waiting for User': 'bg-yellow-100 text-yellow-800',
-  'Awaiting Employee Confirmation': 'bg-orange-100 text-orange-800',
-  'Reopened': 'bg-red-100 text-red-800',
-  'Resolved': 'bg-green-100 text-green-800',
-  'Closed': 'bg-gray-100 text-gray-700',
-  'Cancelled': 'bg-red-50 text-red-600',
-};
-
-const PRIORITY_COLOR: Record<string, string> = {
-  Low: 'text-slate-500', Medium: 'text-blue-600',
-  High: 'text-orange-600', Critical: 'text-red-600 font-bold',
-};
+import { StatusBadge } from '@/components/StatusBadge';
+import { PriorityBadge } from '@/components/PriorityBadge';
+import { useTicketDetail } from '../hooks/useTicketDetail';
+import { useQueryClient } from '@tanstack/react-query';
 
 const ACTION_BADGE: Record<string, string> = {
   STATUS_CHANGE: 'bg-blue-100 text-blue-800 border-blue-200',
@@ -68,7 +54,7 @@ function WorkTimer({ workStartedAt, priorSeconds = 0 }: { workStartedAt: string;
   return <span className="font-mono text-lg font-bold text-indigo-700">{formatDuration(elapsed)}</span>;
 }
 
-function SlaPanel({ sla }: { sla: any }) {
+function SlaPanel({ sla, ticket }: { sla: any; ticket?: any }) {
   if (!sla?.dueDate) return null;
   const cls = sla.status === 'Breached' ? 'border-red-300 bg-red-50 text-red-700' :
     sla.status === 'Approaching' ? 'border-orange-300 bg-orange-50 text-orange-700' : 'border-green-300 bg-green-50 text-green-700';
@@ -77,19 +63,37 @@ function SlaPanel({ sla }: { sla: any }) {
       <CardHeader className="pb-2">
         <CardTitle className={cn('text-sm flex items-center gap-2', cls.split(' ')[2])}>
           <Timer className="h-4 w-4" />
-          SLA: <span className="font-bold">{sla.status}</span>
+          Resolution SLA: <span className="font-bold">{sla.status}</span>
           {sla.isPaused && <Badge className="bg-yellow-200 text-yellow-900 text-xs ml-1">Paused</Badge>}
         </CardTitle>
       </CardHeader>
-      <CardContent className="grid grid-cols-2 gap-3 text-xs">
-        <div><span className="text-muted-foreground block">Due</span><span className="font-semibold">{new Date(sla.dueDate).toLocaleString()}</span></div>
-        <div><span className="text-muted-foreground block">Remaining</span>
-          <span className={cn('font-semibold', cls.split(' ')[2])}>
-            {sla.remainingSeconds < 0 ? `Overdue ${formatDuration(Math.abs(sla.remainingSeconds))}` : formatDuration(sla.remainingSeconds)}
-          </span>
+      <CardContent className="space-y-3">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+          <div><span className="text-muted-foreground block">Due</span><span className="font-semibold">{new Date(sla.dueDate).toLocaleString()}</span></div>
+          <div><span className="text-muted-foreground block">Remaining</span>
+            <span className={cn('font-semibold', cls.split(' ')[2])}>
+              {sla.remainingSeconds < 0 ? `Overdue ${formatDuration(Math.abs(sla.remainingSeconds))}` : formatDuration(sla.remainingSeconds)}
+            </span>
+          </div>
+          <div><span className="text-muted-foreground block">Elapsed</span><span className="font-semibold">{formatDuration(sla.elapsedSeconds)}</span></div>
+          <div><span className="text-muted-foreground block">Paused</span><span className="font-semibold text-yellow-700">{formatDuration(sla.pausedSeconds)}</span></div>
         </div>
-        <div><span className="text-muted-foreground block">Elapsed</span><span className="font-semibold">{formatDuration(sla.elapsedSeconds)}</span></div>
-        <div><span className="text-muted-foreground block">Paused</span><span className="font-semibold text-yellow-700">{formatDuration(sla.pausedSeconds)}</span></div>
+        {ticket?.first_response_due_at && !ticket?.first_response_at && (
+          <div className="pt-2 border-t border-dashed flex justify-between items-center text-xs">
+            <span className="text-muted-foreground">First Response Due:</span>
+            <span className={new Date() > new Date(ticket.first_response_due_at) ? 'text-red-600 font-bold' : 'font-medium'}>
+              {new Date(ticket.first_response_due_at).toLocaleString()}
+            </span>
+          </div>
+        )}
+        {ticket?.first_response_at && (
+          <div className="pt-2 border-t border-dashed flex justify-between items-center text-xs">
+            <span className="text-muted-foreground">First Response Logged:</span>
+            <span className="font-medium text-green-600">
+              {new Date(ticket.first_response_at).toLocaleString()}
+            </span>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -129,12 +133,17 @@ function ResolutionModal({ onClose, onSubmit, isSubmitting }: { onClose: () => v
   ];
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="bg-background rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b sticky top-0 bg-background z-10">
-          <h2 className="text-xl font-bold flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-green-600" />Mark Ticket as Completed</h2>
-          <p className="text-sm text-muted-foreground mt-1">Fill in the resolution details. The employee will review and confirm.</p>
+      <div className="bg-background rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+        <div className="p-6 border-b shrink-0 flex justify-between items-start">
+          <div>
+            <h2 className="text-xl font-bold flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-green-600" />Mark Ticket as Completed</h2>
+            <p className="text-sm text-muted-foreground mt-1">Fill in the resolution details. The employee will review and confirm.</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 -mr-1.5 rounded-full hover:bg-muted text-muted-foreground transition-colors" aria-label="Close">
+            <XCircle className="h-6 w-6" />
+          </button>
         </div>
-        <div className="p-6 space-y-5">
+        <div className="p-6 space-y-5 overflow-y-auto">
           {fields.map(({ key, label, req, ph }) => (
             <div key={key}>
               <label className="text-sm font-semibold mb-1 block">{label} {req && <span className="text-red-500">*</span>}</label>
@@ -145,8 +154,8 @@ function ResolutionModal({ onClose, onSubmit, isSubmitting }: { onClose: () => v
             </div>
           ))}
         </div>
-        <div className="p-6 border-t flex justify-end gap-3">
-          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>Cancel</Button>
+        <div className="p-6 border-t flex justify-end gap-3 shrink-0 bg-background/50">
+          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>Back</Button>
           <Button onClick={() => validate() && onSubmit(form)} disabled={isSubmitting} className="bg-green-600 hover:bg-green-700">
             {isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Submitting...</> : <><CheckCircle2 className="mr-2 h-4 w-4" />Submit Resolution</>}
           </Button>
@@ -380,56 +389,39 @@ function ResolutionHistoryPanel({ resolutions, confirmations, isEmployee }: { re
 export function TicketDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [ticket, setTicket] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [comments, setComments] = useState<any[]>([]);
-  const [timeline, setTimeline] = useState<any[]>([]);
-  const [sessionData, setSessionData] = useState<any>(null);
-  const [unitTechnicians, setUnitTechnicians] = useState<any[]>([]);
+  const { profile } = useAuthStore();
+  const queryClient = useQueryClient();
+
+  const role = profile?.roles?.name;
+
+  const { data, isLoading: loading, error: queryError, refetch: reload } = useTicketDetail(id, role);
+  
+  const ticket = data?.ticket;
+  const comments = data?.comments || [];
+  const timeline = data?.timeline || [];
+  const workSummary = data?.workSummary;
+  const resolutionData = data?.resolution || { resolutions: [], confirmations: [] };
+  const unitTechnicians = data?.unitTechnicians || [];
+  const sessionData = ticket?.ticket_self_service_events || null;
+  const error = queryError ? (queryError as Error).message : '';
+  
   const [commentText, setCommentText] = useState('');
   const [isInternal, setIsInternal] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [isPostingComment, setIsPostingComment] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState('');
-  const [workSummary, setWorkSummary] = useState<any>(null);
-  const [resolutionData, setResolutionData] = useState<any>({ resolutions: [], confirmations: [] });
   const [showResolutionModal, setShowResolutionModal] = useState(false);
-  const { profile } = useAuthStore();
 
-  const role = profile?.roles?.name;
   const isAdminOrTech = role === 'Admin' || role === 'Technician';
   const isTech = role === 'Technician';
   const isEmployee = role === 'Employee';
   const isAdmin = role === 'Admin';
   const isAssignedTech = isTech && ticket?.assigned_to === profile?.id;
 
-  const reload = async () => {
-    try {
-      const [t, c, tl] = await Promise.all([api.get(`/tickets/${id}`), api.get(`/tickets/${id}/comments`), api.get(`/tickets/${id}/timeline`)]);
-      setTicket(t.data.data); setComments(c.data.data ?? []); setTimeline(tl.data.data ?? []);
-      api.get(`/tickets/${id}/work-summary`).then(r => setWorkSummary(r.data.data)).catch(() => {});
-      api.get(`/tickets/${id}/resolution`).then(r => setResolutionData(r.data.data)).catch(() => {});
-    } catch (err: any) { setError(err.response?.data?.message || err.message); }
-  };
 
-  useEffect(() => {
-    const init = async () => {
-      setLoading(true);
-      try {
-        const [t, c, tl] = await Promise.all([api.get(`/tickets/${id}`), api.get(`/tickets/${id}/comments`), api.get(`/tickets/${id}/timeline`)]);
-        const tick = t.data.data;
-        setTicket(tick); setComments(c.data.data ?? []); setTimeline(tl.data.data ?? []);
-        if (tick.self_service_session_id) supabase.from('self_service_sessions').select('*, interactions:self_service_interactions(*, article:knowledge_articles(title, slug))').eq('id', tick.self_service_session_id).single().then(({ data }) => setSessionData(data));
-        if (tick.unit_id && (role === 'Admin' || role === 'Technician')) api.get('/employees').then(r => setUnitTechnicians(r.data.data?.filter((e: any) => e.role?.name === 'Technician' && e.unit_id === tick.unit_id) ?? [])).catch(() => {});
-        api.get(`/tickets/${id}/work-summary`).then(r => setWorkSummary(r.data.data)).catch(() => {});
-        api.get(`/tickets/${id}/resolution`).then(r => setResolutionData(r.data.data)).catch(() => {});
-      } catch (err: any) { setError(err.response?.data?.message || err.message); }
-      finally { setLoading(false); }
-    };
-    if (id) init();
-  }, [id, role]);
+
+
 
   const withBusy = async (fn: () => Promise<void>) => {
     if (busy) return; setBusy(true); setActionError('');
@@ -442,14 +434,31 @@ export function TicketDetail() {
   const handleMarkCompleted = async (form: any) => {
     await withBusy(async () => { await api.post(`/tickets/${id}/complete`, form); setShowResolutionModal(false); });
   };
+  const handleWaitForUser = () => withBusy(() => api.post(`/tickets/${id}/wait-for-user`).then(() => {}));
+  const handleEmployeeReply = (comment: string) => withBusy(() => api.post(`/tickets/${id}/employee-reply`, { comment }).then(() => {}));
   const handleConfirm = (rating: number, comment: string) =>
     withBusy(() => api.post(`/tickets/${id}/confirm-resolution`, { confirmed: true, rating, feedback_comment: comment || null }).then(() => {}));
   const handleReject = (reason: string) =>
     withBusy(() => api.post(`/tickets/${id}/confirm-resolution`, { confirmed: false, rejection_reason: reason }).then(() => {}));
 
-  if (loading) return <div className="flex items-center justify-center p-16"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
-  if (error) return <div className="p-8 text-center text-destructive">{error}</div>;
-  if (!ticket) return <div className="p-8 text-center">Ticket not found</div>;
+  if (loading) return <div className="flex flex-col items-center justify-center min-h-[400px]"><Loader2 className="h-10 w-10 animate-spin text-primary mb-4" /><p className="text-muted-foreground animate-pulse">Loading ticket details...</p></div>;
+  if (error) return (
+    <div className="flex items-center justify-center min-h-[400px]">
+      <Card className="max-w-md w-full border-red-200 shadow-lg">
+        <CardContent className="pt-6 flex flex-col items-center text-center space-y-4">
+          <div className="h-12 w-12 rounded-full bg-red-100 flex items-center justify-center">
+            <AlertTriangle className="h-6 w-6 text-red-600" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-foreground">Failed to Load Ticket</h2>
+            <p className="text-sm text-muted-foreground mt-2">{error}</p>
+          </div>
+          <Button onClick={() => reload()} variant="outline" className="mt-4"><RotateCcw className="mr-2 h-4 w-4" />Retry Connection</Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+  if (!ticket) return <div className="p-8 text-center text-muted-foreground">Ticket not found</div>;
 
   const { status } = ticket;
   const isClosed = ['Closed', 'Cancelled', 'Resolved'].includes(status);
@@ -458,17 +467,17 @@ export function TicketDetail() {
     <div className="space-y-6">
       {showResolutionModal && <ResolutionModal onClose={() => setShowResolutionModal(false)} onSubmit={handleMarkCompleted} isSubmitting={busy} />}
 
-      <div className="flex justify-between items-start gap-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
         <div>
-          <div className="flex flex-wrap items-center gap-2 mb-1">
-            <Badge className={cn('text-xs font-semibold px-2.5 py-1', STATUS_BG[status] || 'bg-gray-100 text-gray-700')}>{status}</Badge>
-            <span className={cn('text-sm font-semibold', PRIORITY_COLOR[ticket.priority])}>{ticket.priority} Priority</span>
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <StatusBadge status={status} />
+            <PriorityBadge priority={ticket.priority} />
             {ticket.reopen_count > 0 && <Badge variant="outline" className="text-orange-700 border-orange-300 text-xs"><RotateCcw className="h-3 w-3 mr-1" />Reopened {ticket.reopen_count}x</Badge>}
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">{ticket.ticket_number}: {ticket.subject}</h1>
-          <p className="text-muted-foreground text-sm mt-1">Submitted by {ticket.creator?.full_name} on {new Date(ticket.created_at).toLocaleString()}</p>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">{ticket.ticket_number}: {ticket.subject}</h1>
+          <p className="text-muted-foreground text-sm mt-1">Submitted by {ticket.requester?.full_name || ticket.creator?.full_name} on {new Date(ticket.created_at).toLocaleString()}</p>
         </div>
-        <Button variant="outline" onClick={() => navigate(-1)}>Back</Button>
+        <Button variant="outline" className="shrink-0" onClick={() => navigate(-1)}>Back</Button>
       </div>
 
       {actionError && (
@@ -491,23 +500,48 @@ export function TicketDetail() {
               )}
               {status === 'Awaiting Employee Confirmation' && <p className="text-sm text-orange-700 mt-1">Waiting for employee to confirm resolution.</p>}
             </div>
-            <div className="flex gap-3">
-              {status === 'Assigned' && (
-                <Button id="btn-start-work" onClick={handleStartWork} disabled={busy} className="bg-indigo-600 hover:bg-indigo-700" size="lg">
-                  {busy ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Starting...</> : <><Play className="mr-2 h-5 w-5" />Start Work</>}
+            <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+              {(status === 'Assigned' || status === 'Accepted') && (
+                <Button id="btn-start-work" onClick={handleStartWork} disabled={busy} className="bg-indigo-600 hover:bg-indigo-700 flex-1 sm:flex-none" size="sm">
+                  {busy ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Starting...</> : <><Play className="mr-2 h-4 w-4" />Start Work</>}
                 </Button>
               )}
               {status === 'Reopened' && (
-                <Button id="btn-resume-work" onClick={handleStartWork} disabled={busy} className="bg-orange-600 hover:bg-orange-700">
-                  {busy ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Resuming...</> : <><RotateCcw className="mr-2 h-4 w-4" />Resume Work</>}
+                <Button id="btn-resume-work" onClick={handleStartWork} disabled={busy} className="bg-orange-600 hover:bg-orange-700 flex-1 sm:flex-none" size="sm">
+                  {busy ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Resuming...</> : <><RotateCcw className="mr-2 h-4 w-4" />Resume</>}
                 </Button>
               )}
               {status === 'In Progress' && (
-                <Button id="btn-mark-completed" onClick={() => setShowResolutionModal(true)} disabled={busy} className="bg-green-600 hover:bg-green-700">
-                  <CheckCircle2 className="mr-2 h-4 w-4" />Mark as Completed
-                </Button>
+                <>
+                  <Button id="btn-wait-for-user" onClick={handleWaitForUser} disabled={busy} className="bg-yellow-600 hover:bg-yellow-700 flex-1 sm:flex-none" size="sm">
+                    <Clock className="mr-1 h-4 w-4" />Wait for User
+                  </Button>
+                  <Button id="btn-mark-completed" onClick={() => setShowResolutionModal(true)} disabled={busy} className="bg-green-600 hover:bg-green-700 flex-1 sm:flex-none" size="sm">
+                    <CheckCircle2 className="mr-1 h-4 w-4" />Complete
+                  </Button>
+                </>
               )}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {isEmployee && status === 'Waiting for User' && (
+        <Card className="border-2 border-yellow-300 bg-yellow-50">
+          <CardHeader>
+            <CardTitle className="text-yellow-900 flex items-center gap-2"><Clock className="h-5 w-5"/> Technician is waiting for your response</CardTitle>
+            <CardDescription className="text-yellow-800">Please provide the requested information so the technician can continue working on your ticket.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <textarea
+              className="w-full min-h-[90px] p-3 border rounded-lg text-sm bg-white border-yellow-200"
+              placeholder="Reply to the technician..."
+              value={commentText}
+              onChange={(e) => setCommentText(e.target.value)}
+            />
+            <Button className="mt-3 bg-yellow-600 hover:bg-yellow-700 text-yellow-950 font-medium" disabled={busy || !commentText.trim()} onClick={() => { handleEmployeeReply(commentText); setCommentText(''); }}>
+              {busy ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/>Replying...</> : 'Reply & Resume Work'}
+            </Button>
           </CardContent>
         </Card>
       )}
@@ -517,126 +551,18 @@ export function TicketDetail() {
           onConfirm={handleConfirm} onReject={handleReject} busy={busy} />
       )}
 
-      {isAdminOrTech && !isClosed && workSummary?.slaStatus && <SlaPanel sla={workSummary.slaStatus} />}
+      {isAdminOrTech && !isClosed && workSummary?.slaStatus && <SlaPanel sla={workSummary.slaStatus} ticket={ticket} />}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="md:col-span-2 space-y-6">
-          <Card>
-            <CardHeader><CardTitle>Description</CardTitle></CardHeader>
-            <CardContent><p className="whitespace-pre-wrap text-sm leading-relaxed">{ticket.description}</p></CardContent>
-          </Card>
-
-          {sessionData && (
-            <Card className="border-blue-200 bg-blue-50/50">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-blue-900 text-lg flex items-center gap-2"><span className="bg-blue-100 p-1.5 rounded-md">🧠</span> Troubleshooting Already Attempted</CardTitle>
-                <CardDescription className="text-blue-800/80">Knowledge articles viewed before raising this ticket.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {sessionData.interactions?.length > 0 ? (
-                  <ul className="space-y-2">{sessionData.interactions.map((i: any) => (
-                    <li key={i.id} className="text-sm bg-white border border-blue-100 p-3 rounded-md flex items-center gap-2 shadow-sm">
-                      <span className="text-muted-foreground flex-shrink-0">Reviewed:</span>
-                      <a href={`/help-center/article/${i.article?.slug}`} target="_blank" rel="noreferrer" className="font-medium text-blue-700 hover:underline">{i.article?.title || 'Unknown'}</a>
-                    </li>
-                  ))}</ul>
-                ) : <p className="text-sm text-muted-foreground italic">No articles viewed.</p>}
-              </CardContent>
-            </Card>
-          )}
-
-          {resolutionData?.resolutions?.length > 0 && (
-            <ResolutionHistoryPanel resolutions={resolutionData.resolutions} confirmations={resolutionData.confirmations} isEmployee={isEmployee} />
-          )}
-
-          <AttachmentsPanel ticketId={id!} canUpload={(isAssignedTech || isAdmin) && !isClosed} />
-
-          <Card>
-            <CardHeader><CardTitle>Timeline & Activity</CardTitle><CardDescription>All actions, updates, and notes</CardDescription></CardHeader>
-            <CardContent className="space-y-6">
-              {(() => {
-                const clean = timeline.filter((e, i, a) => {
-                  if (e.metadata?.old_status === e.metadata?.new_status) return false;
-                  if (e.message?.match(/Status changed from (.*) to \1/i)) return false;
-                  if (i > 0) { const p = a[i-1]; if (p.message === e.message && p.user_id === e.user_id && Math.abs(new Date(e.created_at).getTime() - new Date(p.created_at).getTime()) < 15000) return false; }
-                  return true;
-                });
-                if (!clean.length) return <p className="text-sm text-muted-foreground text-center py-4">No activity yet.</p>;
-                return (
-                  <div className="relative pl-6 space-y-4 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-muted-foreground/20">
-                    {clean.map(ev => (
-                      <div key={ev.id} className="relative flex items-start gap-3 text-sm">
-                        <div className="absolute -left-6 top-1 h-3 w-3 rounded-full border-2 border-primary bg-background shadow-sm" />
-                        <div className="flex-1 bg-muted/40 p-3 rounded-lg border">
-                          <div className="flex items-center justify-between gap-2 mb-1">
-                            <span className="font-semibold">{ev.user?.full_name || 'System'}</span>
-                            <span className={cn('text-[11px] font-medium px-2 py-0.5 rounded border', ACTION_BADGE[ev.action_type] || 'bg-slate-100 text-slate-700 border-slate-200')}>
-                              {ev.action_type.replace(/_/g, ' ')}
-                            </span>
-                          </div>
-                          <p className="text-muted-foreground text-xs">{ev.message}</p>
-                          <span className="text-[10px] text-muted-foreground block mt-1.5">{new Date(ev.created_at).toLocaleString()}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-              {comments.length > 0 && (
-                <div className="space-y-3 mt-4">
-                  {comments.map((c) => (
-                    <div key={c.id} className={cn('p-4 rounded-lg border', c.is_internal ? 'bg-yellow-50 border-yellow-200' : 'bg-card')}>
-                      <div className="flex justify-between items-center mb-2">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-sm">{c.author?.full_name}</span>
-                          {c.is_internal && <Badge variant="secondary" className="text-xs bg-yellow-200 text-yellow-800">Internal</Badge>}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-muted-foreground">{new Date(c.created_at).toLocaleString()}</span>
-                          {(c.author_id === profile?.id || isAdmin) && (
-                            <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={async () => {
-                              try { await api.delete(`/tickets/${id}/comments/${c.id}`); const [cr, tl] = await Promise.all([api.get(`/tickets/${id}/comments`), api.get(`/tickets/${id}/timeline`)]); setComments(cr.data.data); setTimeline(tl.data.data); } catch {}
-                            }}><Trash2 className="h-4 w-4" /></Button>
-                          )}
-                        </div>
-                      </div>
-                      <p className="text-sm whitespace-pre-wrap">{c.content}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {!isClosed && (
-                <div className="space-y-3 mt-4 pt-4 border-t">
-                  <textarea className="w-full min-h-[90px] p-3 border rounded-lg text-sm resize-none" placeholder="Add a comment..." value={commentText} onChange={e => setCommentText(e.target.value)} />
-                  <div className="flex items-center justify-between">
-                    {isAdminOrTech && (
-                      <label className="flex items-center gap-2 text-sm cursor-pointer">
-                        <input type="checkbox" checked={isInternal} onChange={e => setIsInternal(e.target.checked)} className="rounded" />
-                        <span>Internal Note <span className="text-xs text-muted-foreground">(Hidden from Employee)</span></span>
-                      </label>
-                    )}
-                    <Button disabled={isPostingComment || !commentText.trim()} onClick={async () => {
-                      if (!commentText.trim() || isPostingComment) return;
-                      setIsPostingComment(true);
-                      try { await api.post(`/tickets/${id}/comments`, { content: commentText, is_internal: isInternal }); setCommentText(''); const [cr, tl] = await Promise.all([api.get(`/tickets/${id}/comments`), api.get(`/tickets/${id}/timeline`)]); setComments(cr.data.data); setTimeline(tl.data.data); }
-                      catch {} finally { setIsPostingComment(false); }
-                    }}>
-                      {isPostingComment ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Posting...</> : 'Post Comment'}
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="space-y-4">
+      <div className="flex flex-col lg:grid lg:grid-cols-3 gap-6">
+        
+        {/* Right Column (Metadata) - Rendered first on mobile */}
+        <div className="lg:col-start-3 lg:col-end-4 space-y-4">
           <Card>
             <CardHeader><CardTitle className="text-base">Ticket Details</CardTitle></CardHeader>
             <CardContent className="space-y-4 text-sm">
               <div>
                 <span className="text-muted-foreground block mb-1">Status</span>
-                {isAdminOrTech ? (
+                {isAdmin ? (
                   <select className="w-full p-2 border rounded text-sm font-medium" value={status} disabled={isUpdatingStatus}
                     onChange={async e => {
                       const s = e.target.value; if (s === status || isUpdatingStatus) return;
@@ -646,9 +572,9 @@ export function TicketDetail() {
                     }}>
                     {['Open','Assigned','In Progress','Waiting for User','Awaiting Employee Confirmation','Resolved','Closed','Reopened','Cancelled'].map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
-                ) : <Badge className={cn('text-xs', STATUS_BG[status] || 'bg-gray-100 text-gray-700')}>{status}</Badge>}
+                ) : <StatusBadge status={status} />}
               </div>
-              <div><span className="text-muted-foreground block mb-1">Priority</span><span className={cn('font-semibold', PRIORITY_COLOR[ticket.priority])}>{ticket.priority}</span></div>
+              <div><span className="text-muted-foreground block mb-1">Priority</span><PriorityBadge priority={ticket.priority} /></div>
               <div><span className="text-muted-foreground block mb-1">Category</span><span className="font-medium">{ticket.ticket_categories?.name || 'N/A'}</span></div>
               {ticket.units?.name && <div><span className="text-muted-foreground block mb-1">Unit</span><span className="font-medium">{ticket.units.name}</span></div>}
               {ticket.departments?.name && <div><span className="text-muted-foreground block mb-1">Department</span><span className="font-medium">{ticket.departments.name}</span></div>}
@@ -693,9 +619,130 @@ export function TicketDetail() {
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-sm">Submitted By</CardTitle></CardHeader>
             <CardContent className="text-sm">
-              <p className="font-semibold">{ticket.creator?.full_name}</p>
-              <p className="text-muted-foreground text-xs">{ticket.creator?.email_address}</p>
-              {ticket.creator?.employee_id && <p className="text-muted-foreground text-xs">ID: {ticket.creator.employee_id}</p>}
+              <p className="font-semibold">{ticket.requester?.full_name || ticket.creator?.full_name}</p>
+              <p className="text-muted-foreground text-xs">{ticket.requester?.email_address || ticket.creator?.email_address}</p>
+            </CardContent>
+          </Card>
+          {ticket.requester_id !== ticket.affected_employee_id && ticket.affected && (
+            <Card className="border-primary/50 bg-primary/5">
+              <CardHeader className="pb-2"><CardTitle className="text-sm text-primary">Affected Employee</CardTitle></CardHeader>
+              <CardContent className="text-sm">
+                <p className="font-semibold text-primary">{ticket.affected?.full_name}</p>
+                <p className="text-primary/80 text-xs">{ticket.affected?.email_address}</p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Left Main Column (Description, Timeline, etc) - Rendered second on mobile */}
+        <div className="lg:col-start-1 lg:col-end-3 lg:row-start-1 space-y-6">
+          <Card>
+            <CardHeader><CardTitle>Description</CardTitle></CardHeader>
+            <CardContent><p className="whitespace-pre-wrap text-sm leading-relaxed break-words">{ticket.description}</p></CardContent>
+          </Card>
+
+          {sessionData && (
+            <Card className="border-blue-200 bg-blue-50/50">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-blue-900 text-lg flex items-center gap-2"><span className="bg-blue-100 p-1.5 rounded-md">🧠</span> Troubleshooting Attempted</CardTitle>
+                <CardDescription className="text-blue-800/80">The employee reviewed troubleshooting steps before raising this ticket.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {sessionData.guidance_shown ? (
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-blue-900">{sessionData.guidance_shown.title}</p>
+                    <p className="text-sm text-blue-800">{sessionData.guidance_shown.description}</p>
+                    <div className="text-xs bg-white border border-blue-100 p-3 rounded-md shadow-sm flex flex-wrap items-center gap-2">
+                      <span>Outcome: <span className="font-semibold capitalize">{sessionData.outcome}</span></span>
+                      {sessionData.skip_reason && <span className="text-muted-foreground">({sessionData.skip_reason.replace(/_/g, ' ')})</span>}
+                    </div>
+                  </div>
+                ) : <p className="text-sm text-muted-foreground italic">No troubleshooting details available.</p>}
+              </CardContent>
+            </Card>
+          )}
+
+          {resolutionData?.resolutions?.length > 0 && (
+            <ResolutionHistoryPanel resolutions={resolutionData.resolutions} confirmations={resolutionData.confirmations} isEmployee={isEmployee} />
+          )}
+
+          <AttachmentsPanel ticketId={id!} canUpload={(isAssignedTech || isAdmin) && !isClosed} />
+
+          <Card>
+            <CardHeader><CardTitle>Timeline & Activity</CardTitle><CardDescription>All actions, updates, and notes</CardDescription></CardHeader>
+            <CardContent className="space-y-6">
+              {(() => {
+                const clean = timeline.filter((e: any, i: number, a: any[]) => {
+                  if (e.metadata?.old_status === e.metadata?.new_status) return false;
+                  if (e.message?.match(/Status changed from (.*) to \1/i)) return false;
+                  if (i > 0) { const p = a[i-1]; if (p.message === e.message && p.user_id === e.user_id && Math.abs(new Date(e.created_at).getTime() - new Date(p.created_at).getTime()) < 15000) return false; }
+                  return true;
+                });
+                if (!clean.length) return <p className="text-sm text-muted-foreground text-center py-4">No activity yet.</p>;
+                return (
+                  <div className="relative pl-6 space-y-4 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-muted-foreground/20">
+                    {clean.map((ev: any) => (
+                      <div key={ev.id} className="relative flex items-start gap-3 text-sm">
+                        <div className="absolute -left-6 top-1 h-3 w-3 rounded-full border-2 border-primary bg-background shadow-sm" />
+                        <div className="flex-1 bg-muted/40 p-3 rounded-lg border">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-2 mb-2">
+                            <span className="font-semibold">{ev.user?.full_name || 'System'}</span>
+                            <span className={cn('text-[11px] font-medium px-2 py-0.5 rounded border inline-block w-fit', ACTION_BADGE[ev.action_type] || 'bg-slate-100 text-slate-700 border-slate-200')}>
+                              {ev.action_type.replace(/_/g, ' ')}
+                            </span>
+                          </div>
+                          <p className="text-muted-foreground text-xs break-words">{ev.message}</p>
+                          <span className="text-[10px] text-muted-foreground block mt-1.5">{new Date(ev.created_at).toLocaleString()}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+              {comments.length > 0 && (
+                <div className="space-y-3 mt-4">
+                  {comments.map((c: any) => (
+                    <div key={c.id} className={cn('p-4 rounded-lg border', c.is_internal ? 'bg-yellow-50 border-yellow-200' : 'bg-card')}>
+                      <div className="flex flex-col sm:flex-row sm:justify-between items-start sm:items-center gap-2 mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-sm">{c.author?.full_name}</span>
+                          {c.is_internal && <Badge variant="secondary" className="text-xs bg-yellow-200 text-yellow-800">Internal</Badge>}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">{new Date(c.created_at).toLocaleString()}</span>
+                          {(c.author_id === profile?.id || isAdmin) && (
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={async () => {
+                              try { await api.delete(`/tickets/${id}/comments/${c.id}`); await reload(); } catch {}
+                            }}><Trash2 className="h-4 w-4" /></Button>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-sm whitespace-pre-wrap break-words">{c.content}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!isClosed && (
+                <div className="space-y-3 mt-4 pt-4 border-t">
+                  <textarea className="w-full min-h-[90px] p-3 border rounded-lg text-sm resize-none" placeholder="Add a comment..." value={commentText} onChange={e => setCommentText(e.target.value)} />
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    {isAdminOrTech && (
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input type="checkbox" checked={isInternal} onChange={e => setIsInternal(e.target.checked)} className="rounded" />
+                        <span>Internal Note <span className="text-xs text-muted-foreground">(Hidden from Employee)</span></span>
+                      </label>
+                    )}
+                    <Button className="w-full sm:w-auto" disabled={isPostingComment || !commentText.trim()} onClick={async () => {
+                      if (!commentText.trim() || isPostingComment) return;
+                      setIsPostingComment(true);
+                      try { await api.post(`/tickets/${id}/comments`, { content: commentText, is_internal: isInternal }); setCommentText(''); await reload(); }
+                      catch {} finally { setIsPostingComment(false); }
+                    }}>
+                      {isPostingComment ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Posting...</> : 'Post Comment'}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

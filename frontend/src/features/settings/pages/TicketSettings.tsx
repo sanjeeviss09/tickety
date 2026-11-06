@@ -236,7 +236,21 @@ function NumberingAndStatusManager({ config, queryClient }: { config: any, query
 function CategoriesManager({ categories, queryClient }: { categories: any, queryClient: any }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<any>(null);
-  const [formData, setFormData] = useState({ name: '', description: '', is_active: true, self_service_mode: 'Optional', guidance_enabled: true });
+  const [formData, setFormData] = useState({ 
+    name: '', 
+    description: '', 
+    is_active: true, 
+    self_service_enabled: false,
+    technician_required: false,
+    self_service_title: '',
+    self_service_description: '',
+    troubleshooting_steps: '',
+    video_url: '',
+    allow_skip: true,
+    skip_label: "I Don't Have Time / Raise Ticket",
+    default_priority: 'Low',
+    related_asset_required: false
+  });
 
   const mutation = useMutation({
     mutationFn: async (payload: any) => {
@@ -263,12 +277,26 @@ function CategoriesManager({ categories, queryClient }: { categories: any, query
         name: category.name, 
         description: category.description || '', 
         is_active: category.is_active,
-        self_service_mode: category.self_service_mode || 'Optional',
-        guidance_enabled: category.guidance_enabled ?? true
+        self_service_enabled: category.self_service_enabled ?? false,
+        technician_required: category.technician_required ?? false,
+        self_service_title: category.self_service_title || '',
+        self_service_description: category.self_service_description || '',
+        troubleshooting_steps: category.troubleshooting_steps || '',
+        video_url: category.video_url || '',
+        allow_skip: category.allow_skip ?? true,
+        skip_label: category.skip_label || "I Don't Have Time / Raise Ticket",
+        default_priority: category.default_priority || 'Low',
+        related_asset_required: category.related_asset_required ?? false
       });
     } else {
       setEditingCategory(null);
-      setFormData({ name: '', description: '', is_active: true, self_service_mode: 'Optional', guidance_enabled: true });
+      setFormData({ 
+        name: '', description: '', is_active: true, 
+        self_service_enabled: false, technician_required: false,
+        self_service_title: '', self_service_description: '', troubleshooting_steps: '',
+        video_url: '', allow_skip: true, skip_label: "I Don't Have Time / Raise Ticket",
+        default_priority: 'Low', related_asset_required: false
+      });
     }
     setIsModalOpen(true);
   };
@@ -297,10 +325,12 @@ function CategoriesManager({ categories, queryClient }: { categories: any, query
                 <TableCell className="font-medium">{c.name}</TableCell>
                 <TableCell className="text-muted-foreground">{c.description || '-'}</TableCell>
                 <TableCell>
-                  {c.guidance_enabled ? (
-                    <Badge variant="outline" className="bg-blue-50 text-blue-700">{c.self_service_mode || 'Optional'}</Badge>
+                  {c.self_service_enabled ? (
+                    <Badge variant="outline" className="bg-blue-50 text-blue-700">Self-Service</Badge>
+                  ) : c.technician_required ? (
+                    <span className="text-muted-foreground text-xs font-semibold">Tech Required</span>
                   ) : (
-                    <span className="text-muted-foreground text-xs">Disabled</span>
+                    <span className="text-muted-foreground text-xs">Standard</span>
                   )}
                 </TableCell>
                 <TableCell>
@@ -333,28 +363,73 @@ function CategoriesManager({ categories, queryClient }: { categories: any, query
             </div>
             
             <div className="space-y-4 pt-4 border-t mt-4">
-              <h4 className="font-medium text-sm">Self-Service Troubleshooting</h4>
-              <p className="text-xs text-muted-foreground">If knowledge articles are available for this category, they will be shown to users before ticket creation.</p>
+              <h4 className="font-medium text-sm">Self-Service & Routing</h4>
               
-              <div className="flex items-center space-x-2">
-                <Switch checked={formData.guidance_enabled} onCheckedChange={c => setFormData({...formData, guidance_enabled: c})} />
-                <Label>Enable Self-Service Guidance</Label>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex items-center space-x-2">
+                  <Switch checked={formData.self_service_enabled} onCheckedChange={c => setFormData({...formData, self_service_enabled: c})} />
+                  <Label>Enable Self-Service Guidance</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Switch checked={formData.technician_required} onCheckedChange={c => setFormData({...formData, technician_required: c})} />
+                  <Label>Technician Required</Label>
+                </div>
               </div>
 
-              {formData.guidance_enabled && (
-                <div className="space-y-2">
-                  <Label>Guidance Mode</Label>
-                  <select 
-                    className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                    value={formData.self_service_mode}
-                    onChange={e => setFormData({...formData, self_service_mode: e.target.value})}
-                  >
-                    <option value="Optional">Self-Service Optional (User can skip)</option>
-                    <option value="Self-Service First">Self-Service First (User must review guidance)</option>
-                    <option value="Technician Direct">Technician Direct (Skip guidance entirely)</option>
-                  </select>
+              {formData.self_service_enabled && (
+                <div className="space-y-4 border p-4 rounded-md">
+                  <div className="space-y-2">
+                    <Label>Self-Service Title</Label>
+                    <Input placeholder="e.g. Printer Troubleshooting" value={formData.self_service_title} onChange={e => setFormData({...formData, self_service_title: e.target.value})} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Self-Service Description</Label>
+                    <Input placeholder="Brief explanation of the issue" value={formData.self_service_description} onChange={e => setFormData({...formData, self_service_description: e.target.value})} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Troubleshooting Steps (Markdown)</Label>
+                    <textarea 
+                      className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      placeholder="1. Check power...&#10;2. Check paper..."
+                      value={formData.troubleshooting_steps} onChange={e => setFormData({...formData, troubleshooting_steps: e.target.value})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Video URL (Optional)</Label>
+                    <Input placeholder="https://youtube.com/..." value={formData.video_url} onChange={e => setFormData({...formData, video_url: e.target.value})} />
+                  </div>
+                  <div className="flex items-center space-x-2 pt-2">
+                    <Switch checked={formData.allow_skip} onCheckedChange={c => setFormData({...formData, allow_skip: c})} />
+                    <Label>Allow Skipping Troubleshooting</Label>
+                  </div>
+                  {formData.allow_skip && (
+                    <div className="space-y-2">
+                      <Label>Skip Button Label</Label>
+                      <Input value={formData.skip_label} onChange={e => setFormData({...formData, skip_label: e.target.value})} />
+                    </div>
+                  )}
                 </div>
               )}
+
+              <div className="grid grid-cols-2 gap-4 mt-4">
+                <div className="space-y-2">
+                  <Label>Default Priority</Label>
+                  <select 
+                    className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={formData.default_priority}
+                    onChange={e => setFormData({...formData, default_priority: e.target.value})}
+                  >
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                    <option value="Critical">Critical</option>
+                  </select>
+                </div>
+                <div className="flex items-center space-x-2 mt-8">
+                  <Switch checked={formData.related_asset_required} onCheckedChange={c => setFormData({...formData, related_asset_required: c})} />
+                  <Label>Asset Required</Label>
+                </div>
+              </div>
             </div>
             {editingCategory && (
               <div className="space-y-2">

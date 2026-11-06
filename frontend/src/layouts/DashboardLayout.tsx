@@ -21,6 +21,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 
 export default function DashboardLayout() {
   const { session, profile, loading, signOut } = useAuthStore();
@@ -112,11 +113,19 @@ export default function DashboardLayout() {
       children: [
         { name: 'Asset Inventory', href: '/assets' },
         ...(isAdmin || profile?.roles?.name === 'Technician' ? [
-          { name: 'Add Asset', href: '/assets/add' },
+          { name: 'Add Asset', href: '/assets/new' },
           { name: 'Import Assets', href: '/assets/import' }
         ] : [])
       ]
     },
+    ...(isAdmin || profile?.roles?.name === 'Technician' ? [{ 
+      name: 'Workforce', 
+      icon: Users,
+      id: 'workforce',
+      children: [
+        { name: 'Attendance & Availability', href: '/workforce/attendance' },
+      ]
+    }] : []),
     { name: 'Help Center', href: '/help-center', icon: Book },
     ...(isAdmin || profile?.roles?.name === 'Technician' ? [
       { name: 'Analytics', href: '/analytics', icon: BarChart2 },
@@ -138,10 +147,10 @@ export default function DashboardLayout() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex h-[100dvh] overflow-hidden bg-background">
       {/* Sidebar - Desktop */}
-      <div className="hidden lg:flex lg:w-64 lg:flex-col lg:border-r bg-card">
-        <div className="flex h-14 items-center border-b px-4">
+      <div className="hidden lg:flex lg:w-64 lg:flex-col lg:border-r bg-card shrink-0">
+        <div className="flex h-14 items-center border-b px-4 shrink-0">
           <Link to="/" className="flex items-center gap-2 font-bold text-lg text-primary truncate max-w-full">
             <div className="bg-primary text-primary-foreground p-1 rounded-md shrink-0">{appInitials}</div>
             <span className="truncate">{appName}</span>
@@ -214,14 +223,92 @@ export default function DashboardLayout() {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden min-w-0">
         {/* Top Header */}
-        <header className="flex h-14 items-center justify-between border-b bg-card px-4 lg:px-6">
+        <header className="flex h-14 items-center justify-between border-b bg-card px-4 lg:px-6 shrink-0">
           <div className="flex items-center lg:hidden">
-            <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)}>
-              <Menu className="h-5 w-5" />
-            </Button>
-            <span className="ml-3 font-bold text-lg text-primary truncate">{appName}</span>
+            <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+              <SheetTrigger asChild>
+                <Button variant="ghost" size="icon">
+                  <Menu className="h-5 w-5" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="p-0 w-72">
+                <SheetHeader className="p-4 border-b text-left">
+                  <SheetTitle className="flex items-center gap-2 font-bold text-lg text-primary truncate">
+                    <div className="bg-primary text-primary-foreground p-1 rounded-md shrink-0">{appInitials}</div>
+                    <span>{appName}</span>
+                  </SheetTitle>
+                </SheetHeader>
+                <div className="h-[calc(100vh-4rem)] pb-8 overflow-y-auto">
+                  <nav className="space-y-1 p-4">
+                    {navigation.map((item) => (
+                      <div key={item.name}>
+                        {item.children ? (
+                          <>
+                            <button
+                              onClick={() => item.id && toggleMenu(item.id)}
+                              className={cn(
+                                'w-full group flex items-center justify-between px-3 py-2.5 text-sm rounded-md transition-colors',
+                                (location.pathname.startsWith(`/${item.id}`) || expandedMenus[item.id!])
+                                  ? 'bg-primary/10 text-primary font-medium'
+                                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                              )}
+                            >
+                              <div className="flex items-center">
+                                <item.icon className="mr-3 flex-shrink-0 h-5 w-5" aria-hidden="true" />
+                                {item.name}
+                              </div>
+                              {expandedMenus[item.id!] ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                            </button>
+                            {expandedMenus[item.id!] && (
+                              <div className="ml-8 mt-1 space-y-1">
+                                {item.children.map(child => (
+                                  <Link
+                                    key={child.name}
+                                    to={child.href}
+                                    onClick={() => setSidebarOpen(false)}
+                                    className={cn(
+                                      'block px-3 py-2 text-sm rounded-md transition-colors',
+                                      location.pathname === child.href
+                                        ? 'text-primary font-medium bg-primary/5'
+                                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                                    )}
+                                  >
+                                    {child.name}
+                                  </Link>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <Link
+                            to={item.href!}
+                            onClick={() => setSidebarOpen(false)}
+                            className={cn(
+                              location.pathname === item.href
+                                ? 'bg-primary/10 text-primary font-medium'
+                                : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                              'group flex items-center px-3 py-2.5 text-sm rounded-md transition-colors'
+                            )}
+                          >
+                            <item.icon
+                              className={cn(
+                                location.pathname === item.href ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground',
+                                'mr-3 flex-shrink-0 h-5 w-5 transition-colors'
+                              )}
+                              aria-hidden="true"
+                            />
+                            {item.name}
+                          </Link>
+                        )}
+                      </div>
+                    ))}
+                  </nav>
+                </div>
+              </SheetContent>
+            </Sheet>
+            <span className="ml-3 font-bold text-lg text-primary truncate max-w-[120px] sm:max-w-xs">{appName}</span>
           </div>
 
           <div className="hidden lg:flex items-center gap-2 text-sm text-muted-foreground">
@@ -319,46 +406,13 @@ export default function DashboardLayout() {
         </header>
 
         {/* Main scrollable area */}
-        <main className="flex-1 overflow-y-auto bg-muted/20 p-4 lg:p-8">
-          <div className="mx-auto max-w-7xl">
+        <main className="flex-1 overflow-y-auto no-scrollbar bg-muted/20 p-3 sm:p-4 lg:p-6 flex flex-col min-h-0">
+          <div className="mx-auto max-w-7xl w-full flex-1 flex flex-col min-h-0">
             <Outlet />
           </div>
         </main>
       </div>
 
-      {/* Mobile Sidebar Overlay placeholder */}
-      {sidebarOpen && (
-        <div className="fixed inset-0 z-50 flex lg:hidden">
-          <div className="fixed inset-0 bg-background/80 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
-          <div className="fixed inset-y-0 left-0 w-64 bg-card border-r shadow-lg flex flex-col p-4 z-50">
-            <div className="flex items-center justify-between mb-6">
-              <span className="font-bold text-lg text-primary truncate pr-2">{appName}</span>
-              <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(false)}>
-                <span className="sr-only">Close sidebar</span>
-                &times;
-              </Button>
-            </div>
-            <nav className="space-y-1">
-              {navigation.map((item) => (
-                <Link
-                  key={item.name}
-                  to={item.href || '#'}
-                  className={cn(
-                    location.pathname === item.href
-                      ? 'bg-primary/10 text-primary font-medium'
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                    'flex items-center px-2 py-2 text-sm rounded-md'
-                  )}
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <item.icon className="mr-3 h-5 w-5" />
-                  {item.name}
-                </Link>
-              ))}
-            </nav>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

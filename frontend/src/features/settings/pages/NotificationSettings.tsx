@@ -236,7 +236,7 @@ function EmailTemplatesManager({ templates, queryClient }: { templates: any, que
     onSuccess: () => {
       setIsTestModalOpen(false);
       setTestEmail('');
-      alert('Test email sent successfully via Edge Function!');
+      alert('Test email sent successfully via platform SMTP!');
     },
     onError: (err: any) => {
       alert(err.response?.data?.message || 'Failed to send test email');

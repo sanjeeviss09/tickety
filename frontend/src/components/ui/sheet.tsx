@@ -65,22 +65,20 @@ const SheetContent = React.forwardRef<
       {/* Gradient accent bar */}
       {(side === "right" || side === "left") && (
         <div className={cn(
-          "absolute top-0 w-1 h-full bg-gradient-to-b from-violet-500 via-blue-500 to-cyan-400",
+          "absolute top-0 w-1 h-full bg-gradient-to-b from-violet-500 via-blue-500 to-cyan-400 z-10",
           side === "right" ? "left-0" : "right-0"
         )} />
       )}
       {(side === "top" || side === "bottom") && (
         <div className={cn(
-          "absolute left-0 h-1 w-full bg-gradient-to-r from-violet-500 via-blue-500 to-cyan-400",
+          "absolute left-0 h-1 w-full bg-gradient-to-r from-violet-500 via-blue-500 to-cyan-400 z-10",
           side === "top" ? "bottom-0" : "top-0"
         )} />
       )}
 
-      <div className="p-6 h-full overflow-y-auto">
-        {children}
-      </div>
+      {children}
 
-      <SheetPrimitive.Close className="absolute right-4 top-4 rounded-full w-7 h-7 flex items-center justify-center bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none z-10">
+      <SheetPrimitive.Close className="absolute right-4 top-4 rounded-full w-7 h-7 flex items-center justify-center bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none z-50">
         <X className="h-3.5 w-3.5" />
         <span className="sr-only">Close</span>
       </SheetPrimitive.Close>
@@ -95,7 +93,7 @@ const SheetHeader = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "flex flex-col space-y-1.5 pb-5 border-b border-border/60 mb-5",
+      "flex flex-col space-y-2 text-center sm:text-left",
       className
     )}
     {...props}

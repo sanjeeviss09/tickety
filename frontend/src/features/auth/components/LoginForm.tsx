@@ -23,8 +23,48 @@ const loginSchema = z.object({
 
 export function LoginForm() {
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isFirstLogin, setIsFirstLogin] = useState(false);
+
+  const handleForgotPassword = async () => {
+    const employee_id = form.getValues('employee_id');
+    if (!employee_id) {
+      setError('Please enter your Employee ID first to reset your password.');
+      return;
+    }
+    
+    setIsLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const email = `${employee_id.toLowerCase()}@deskpulse.internal`;
+      let targetEmail = email;
+      
+      try {
+        const profileRes = await api.get(`/employees`);
+        const matchedEmp = profileRes.data.data?.find(
+          (e: any) => e.employee_id?.toUpperCase() === employee_id.toUpperCase()
+        );
+        if (matchedEmp?.email_address) {
+          targetEmail = matchedEmp.email_address;
+        }
+      } catch {}
+
+      const { error } = await supabase.auth.resetPasswordForEmail(targetEmail, {
+        redirectTo: window.location.origin + '/update-password',
+      });
+
+      if (error) throw error;
+
+      setSuccess('Password reset link sent to your email.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to send reset email.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const form = useHookForm<z.infer<typeof loginSchema>>({
     resolver: zodResolver(loginSchema),
@@ -169,22 +209,38 @@ export function LoginForm() {
             {error && (
               <div className="text-sm font-medium text-destructive">{error}</div>
             )}
+            
+            {success && (
+              <div className="text-sm font-medium text-green-600">{success}</div>
+            )}
 
             <Button type="submit" className="w-full" disabled={isLoading}>
               {isLoading ? (isFirstLogin ? 'Setting up...' : 'Signing in...') : (isFirstLogin ? 'Set Password & Login' : 'Sign In')}
             </Button>
             
-            <div className="text-center mt-4">
+            <div className="flex flex-col space-y-2 text-center mt-4">
               <Button 
                 type="button" 
                 variant="link" 
                 onClick={() => {
                   setIsFirstLogin(!isFirstLogin);
                   setError(null);
+                  setSuccess(null);
                 }}
               >
                 {isFirstLogin ? 'Already have a password? Sign in here.' : 'First time login? Set up your password.'}
               </Button>
+              
+              {!isFirstLogin && (
+                <Button 
+                  type="button" 
+                  variant="link" 
+                  onClick={handleForgotPassword}
+                  disabled={isLoading}
+                >
+                  Forgot your password?
+                </Button>
+              )}
             </div>
           </form>
         </Form>

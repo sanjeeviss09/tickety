@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
-import { Trophy, Clock } from 'lucide-react';
+import { Trophy, Clock, ChevronRight, User } from 'lucide-react';
+import { IndividualPerformanceModal } from '@/features/analytics/components/IndividualPerformanceModal';
 
 interface TechnicianRankTableProps {
   data: {
@@ -13,6 +15,7 @@ interface TechnicianRankTableProps {
     slaCompliance: number;
   }[];
   loading?: boolean;
+  onSelectTechnician?: (technicianId: string) => void;
 }
 
 const getRankIcon = (index: number) => {
@@ -22,12 +25,26 @@ const getRankIcon = (index: number) => {
   return <span className="text-muted-foreground font-bold text-sm">#{index + 1}</span>;
 };
 
-export function TechnicianRankTable({ data, loading }: TechnicianRankTableProps) {
+export function TechnicianRankTable({ data, loading, onSelectTechnician }: TechnicianRankTableProps) {
+  const [selectedTechId, setSelectedTechId] = useState<string | null>(null);
+
+  const handleRowClick = (techId: string) => {
+    setSelectedTechId(techId);
+    onSelectTechnician?.(techId);
+  };
+
   return (
     <div className="bg-card rounded-xl border shadow-sm p-5">
-      <div className="flex items-center gap-2 mb-4">
-        <Trophy className="h-5 w-5 text-yellow-500" />
-        <h3 className="font-semibold text-base">Technician Rankings</h3>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Trophy className="h-5 w-5 text-yellow-500" />
+          <div>
+            <h3 className="font-semibold text-base">Technician Rankings</h3>
+            <p className="text-xs text-muted-foreground">
+              Click any technician to view their individual performance scorecard
+            </p>
+          </div>
+        </div>
       </div>
 
       {loading ? (
@@ -45,16 +62,24 @@ export function TechnicianRankTable({ data, loading }: TechnicianRankTableProps)
                 <th className="text-right pb-3 pr-4">Resolved</th>
                 <th className="text-right pb-3 pr-4">Pending</th>
                 <th className="text-right pb-3 pr-4">Avg Time</th>
-                <th className="text-right pb-3">SLA</th>
+                <th className="text-right pb-3 pr-3">SLA</th>
+                <th className="text-right pb-3 w-8"></th>
               </tr>
             </thead>
             <tbody>
               {data.map((tech, index) => (
-                <tr key={tech.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                <tr
+                  key={tech.id}
+                  onClick={() => handleRowClick(tech.id)}
+                  className="border-b last:border-0 hover:bg-muted/50 cursor-pointer transition-colors group"
+                  title="Click to view detailed individual performance"
+                >
                   <td className="py-3 pr-4">{getRankIcon(index)}</td>
                   <td className="py-3 pr-4">
                     <div>
-                      <p className="font-medium">{tech.name}</p>
+                      <p className="font-medium group-hover:text-primary transition-colors flex items-center gap-1.5">
+                        {tech.name}
+                      </p>
                       {tech.email && <p className="text-xs text-muted-foreground">{tech.email}</p>}
                     </div>
                   </td>
@@ -66,10 +91,13 @@ export function TechnicianRankTable({ data, loading }: TechnicianRankTableProps)
                       <Clock className="h-3 w-3" />{tech.avgResolutionHours}h
                     </span>
                   </td>
-                  <td className="py-3 text-right">
+                  <td className="py-3 pr-3 text-right">
                     <Badge variant={tech.slaCompliance >= 90 ? 'default' : tech.slaCompliance >= 75 ? 'secondary' : 'destructive'} className="text-xs">
                       {tech.slaCompliance}%
                     </Badge>
+                  </td>
+                  <td className="py-3 text-right">
+                    <ChevronRight className="h-4 w-4 text-muted-foreground opacity-30 group-hover:opacity-100 group-hover:text-primary transition-all ml-auto" />
                   </td>
                 </tr>
               ))}
@@ -77,6 +105,15 @@ export function TechnicianRankTable({ data, loading }: TechnicianRankTableProps)
           </table>
         </div>
       )}
+
+      {/* Individual Performance Scorecard Modal */}
+      <IndividualPerformanceModal
+        technicianId={selectedTechId}
+        open={!!selectedTechId}
+        onOpenChange={(open) => {
+          if (!open) setSelectedTechId(null);
+        }}
+      />
     </div>
   );
 }

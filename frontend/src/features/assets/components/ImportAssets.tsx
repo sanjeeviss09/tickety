@@ -22,7 +22,15 @@ export function ImportAssets() {
     queryKey: ['assetCategories'],
     queryFn: async () => {
       const res = await api.get('/assets/categories');
-      return res.data.data;
+      return res.data?.data || res.data || [];
+    }
+  });
+
+  const { data: employees = [] } = useQuery({
+    queryKey: ['employees'],
+    queryFn: async () => {
+      const res = await api.get('/employees');
+      return res.data?.data || [];
     }
   });
   
@@ -34,15 +42,33 @@ export function ImportAssets() {
         brand: 'Apple',
         model: 'M3 Pro',
         serial_number: 'C02XXXXX',
-        category_name: 'Laptops', // Use name for template, backend maps to ID or fails if we don't handle it
+        category_name: 'Laptops',
+        assigned_employee_id: 'AXX07',
+        unit: '', // Auto-filled from assigned employee if left blank
+        department: '', // Auto-filled from assigned employee if left blank
+        location: 'HQ Floor 2',
         purchase_date: '2024-01-15',
         purchase_cost: 2499.00,
         vendor: 'Apple Inc',
         status: 'Available',
-        condition: 'Excellent',
+        condition: 'Excellent'
+      },
+      {
+        asset_code: 'AST-002',
+        name: 'Dell UltraSharp 27"',
+        brand: 'Dell',
+        model: 'U2723QE',
+        serial_number: 'CN0YYYYY',
+        category_name: 'Monitors',
+        assigned_employee_id: '',
         unit: 'Corporate',
         department: 'IT',
-        location: 'HQ'
+        location: 'Server Room',
+        purchase_date: '2024-02-10',
+        purchase_cost: 599.00,
+        vendor: 'Dell Technologies',
+        status: 'Available',
+        condition: 'Good'
       }
     ]);
     const wb = XLSX.utils.book_new();
@@ -64,16 +90,52 @@ export function ImportAssets() {
       const ws = wb.Sheets[wsname];
       const data = XLSX.utils.sheet_to_json(ws);
       
-      // Map category_name to category_id
+      // Process data: Map category and resolve employee for auto-filling Unit & Department
       const processedData = data.map((row: any) => {
         let category_id = null;
-        if (row.category_name) {
+        if (row.category_name && categories.length > 0) {
           const category = categories.find((c: any) => c.name.toLowerCase() === String(row.category_name).toLowerCase());
           if (category) category_id = category.id;
         }
+
+        const empIdentifier = String(row.assigned_employee_id || row.employee_id || row.assigned_to || '').trim();
+        let unit = row.unit ? String(row.unit).trim() : '';
+        let department = row.department ? String(row.department).trim() : '';
+        let status = row.status ? String(row.status).trim() : 'Available';
+        let matchedEmpLabel = '';
+
+        if (empIdentifier && employees.length > 0) {
+          const cleanKey = empIdentifier.toLowerCase();
+          const matchedEmp = employees.find((emp: any) => 
+            (emp.employee_id && emp.employee_id.toLowerCase() === cleanKey) ||
+            (emp.id && emp.id.toLowerCase() === cleanKey) ||
+            (emp.email_address && emp.email_address.toLowerCase() === cleanKey)
+          );
+
+          if (matchedEmp) {
+            matchedEmpLabel = matchedEmp.employee_id ? `${matchedEmp.employee_id} - ${matchedEmp.full_name}` : matchedEmp.full_name;
+            if (!unit) {
+              unit = matchedEmp.unit?.name || '';
+            }
+            if (!department) {
+              department = matchedEmp.department?.name || '';
+            }
+            if (!row.status || row.status === 'Available') {
+              status = 'Assigned';
+            }
+          } else {
+            matchedEmpLabel = empIdentifier;
+          }
+        }
+
         return {
           ...row,
-          category_id
+          category_id,
+          assigned_employee_id: empIdentifier || undefined,
+          unit,
+          department,
+          status,
+          _matchedEmpLabel: matchedEmpLabel
         };
       });
 
@@ -119,7 +181,9 @@ export function ImportAssets() {
           <Card className="md:col-span-1 h-fit">
             <CardHeader>
               <CardTitle>1. Download Template</CardTitle>
-              <CardDescription>Use the standard template to ensure correct formatting.</CardDescription>
+              <CardDescription>
+                Use the standard template. If you specify an <strong>Assigned Employee ID</strong> (e.g. AXX07), <strong>Business Unit</strong> and <strong>Department</strong> will auto-fill from their profile!
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <Button onClick={downloadTemplate} className="w-full">
@@ -164,23 +228,41 @@ export function ImportAssets() {
                         <TableHead>Code</TableHead>
                         <TableHead>Name</TableHead>
                         <TableHead>Category</TableHead>
-                        <TableHead>Serial</TableHead>
+                        <TableHead>Assigned Employee</TableHead>
+                        <TableHead>Business Unit</TableHead>
+                        <TableHead>Department</TableHead>
                         <TableHead>Status</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {previewData.slice(0, 10).map((row, i) => (
                         <TableRow key={i}>
-                          <TableCell>{row.asset_code}</TableCell>
-                          <TableCell>{row.name}</TableCell>
-                          <TableCell>{row.category_name || (row.category_id ? 'Valid ID' : 'Missing')}</TableCell>
-                          <TableCell>{row.serial_number}</TableCell>
-                          <TableCell>{row.status || 'Available'}</TableCell>
+                          <TableCell className="font-mono text-xs">{row.asset_code}</TableCell>
+                          <TableCell className="font-medium text-xs">{row.name}</TableCell>
+                          <TableCell className="text-xs">{row.category_name || (row.category_id ? 'Valid Category' : 'Default')}</TableCell>
+                          <TableCell className="text-xs">
+                            {row._matchedEmpLabel ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-primary/10 text-primary">
+                                {row._matchedEmpLabel}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs">{row.unit || <span className="text-muted-foreground">—</span>}</TableCell>
+                          <TableCell className="text-xs">{row.department || <span className="text-muted-foreground">—</span>}</TableCell>
+                          <TableCell className="text-xs">
+                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                              row.status === 'Assigned' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'
+                            }`}>
+                              {row.status || 'Available'}
+                            </span>
+                          </TableCell>
                         </TableRow>
                       ))}
                       {previewData.length > 10 && (
                         <TableRow>
-                          <TableCell colSpan={5} className="text-center text-muted-foreground">
+                          <TableCell colSpan={7} className="text-center text-muted-foreground">
                             ... and {previewData.length - 10} more rows
                           </TableCell>
                         </TableRow>

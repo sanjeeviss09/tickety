@@ -32,6 +32,9 @@ const assetSchema = z.object({
   department: z.string().optional(),
   location: z.string().optional(),
   notes: z.string().optional(),
+  assigned_to: z.string().optional(),
+  warranty: z.string().optional(),
+  port_number: z.string().optional(),
 });
 
 type AssetFormValues = z.infer<typeof assetSchema>;
@@ -56,6 +59,14 @@ export function AssetForm() {
     }
   });
 
+  const { data: employees = [] } = useQuery({
+    queryKey: ['employees'],
+    queryFn: async () => {
+      const res = await api.get('/employees');
+      return res.data.data;
+    }
+  });
+
   const form = useForm<AssetFormValues>({
     resolver: zodResolver(assetSchema) as any,
     defaultValues: {
@@ -71,7 +82,10 @@ export function AssetForm() {
       unit: '',
       department: '',
       location: '',
-      notes: ''
+      notes: '',
+      assigned_to: '',
+      warranty: '',
+      port_number: ''
     },
   });
 
@@ -81,7 +95,11 @@ export function AssetForm() {
 
   const onSubmit = async (data: AssetFormValues) => {
     try {
-      await createAsset(data);
+      const payload = { ...data };
+      if (payload.assigned_to === 'unassigned' || payload.assigned_to === '') {
+        delete payload.assigned_to;
+      }
+      await createAsset(payload);
       navigate('/assets');
     } catch (error) {
       console.error('Failed to create asset:', error);
@@ -89,31 +107,48 @@ export function AssetForm() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <div className="flex items-center space-x-4">
-        <Button variant="ghost" onClick={() => navigate('/assets')}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back to Assets
-        </Button>
-        <h1 className="text-3xl font-bold tracking-tight">Create Asset</h1>
+    <div className="w-full max-w-7xl mx-auto space-y-4">
+      {/* Top action header */}
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-1 border-b">
+        <div className="flex items-center space-x-3">
+          <Button variant="ghost" size="sm" onClick={() => navigate('/assets')}>
+            <ArrowLeft className="mr-1.5 h-4 w-4" /> Back to Assets
+          </Button>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Create Asset</h1>
+            <p className="text-xs text-muted-foreground">Register a new IT hardware or software asset into the inventory</p>
+          </div>
+        </div>
+        <div className="flex items-center space-x-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => navigate('/assets')}>
+            Cancel
+          </Button>
+          <Button 
+            type="button" 
+            size="sm" 
+            onClick={form.handleSubmit(onSubmit as any)}
+            disabled={loading || form.formState.isSubmitting}
+          >
+            {loading || form.formState.isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...</> : 'Create Asset'}
+          </Button>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Asset Details</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <Card className="shadow-sm">
+        <CardContent className="p-5">
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit as any)} className="space-y-6">
+            <form onSubmit={form.handleSubmit(onSubmit as any)} className="space-y-4">
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* Row 1 */}
                 <FormField
                   control={form.control as any}
                   name="asset_code"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Asset Code *</FormLabel>
+                    <FormItem className="space-y-1.5">
+                      <FormLabel className="text-xs font-semibold">Asset Code *</FormLabel>
                       <FormControl>
-                        <Input placeholder="e.g. AST-2024-001" {...field} />
+                        <Input placeholder="e.g. AST-2024-001" className="h-9 text-sm" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -124,10 +159,10 @@ export function AssetForm() {
                   control={form.control as any}
                   name="name"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Asset Name *</FormLabel>
+                    <FormItem className="space-y-1.5">
+                      <FormLabel className="text-xs font-semibold">Asset Name *</FormLabel>
                       <FormControl>
-                        <Input placeholder="e.g. Dell XPS 15" {...field} />
+                        <Input placeholder="e.g. Dell XPS 15" className="h-9 text-sm" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -138,11 +173,11 @@ export function AssetForm() {
                   control={form.control as any}
                   name="category_id"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Category *</FormLabel>
+                    <FormItem className="space-y-1.5">
+                      <FormLabel className="text-xs font-semibold">Category *</FormLabel>
                       <Select onValueChange={field.onChange} defaultValue={field.value}>
                         <FormControl>
-                          <SelectTrigger>
+                          <SelectTrigger className="h-9 text-sm">
                             <SelectValue placeholder="Select a category" />
                           </SelectTrigger>
                         </FormControl>
@@ -161,11 +196,11 @@ export function AssetForm() {
                   control={form.control as any}
                   name="status"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Status</FormLabel>
+                    <FormItem className="space-y-1.5">
+                      <FormLabel className="text-xs font-semibold">Status</FormLabel>
                       <Select onValueChange={field.onChange} defaultValue={field.value}>
                         <FormControl>
-                          <SelectTrigger>
+                          <SelectTrigger className="h-9 text-sm">
                             <SelectValue placeholder="Select status" />
                           </SelectTrigger>
                         </FormControl>
@@ -182,15 +217,58 @@ export function AssetForm() {
                   )}
                 />
 
+                {/* Row 2 */}
+                <FormField
+                  control={form.control as any}
+                  name="brand"
+                  render={({ field }) => (
+                    <FormItem className="space-y-1.5">
+                      <FormLabel className="text-xs font-semibold">Brand</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. Dell" className="h-9 text-sm" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control as any}
+                  name="model"
+                  render={({ field }) => (
+                    <FormItem className="space-y-1.5">
+                      <FormLabel className="text-xs font-semibold">Model</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. XPS 15 9500" className="h-9 text-sm" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control as any}
+                  name="serial_number"
+                  render={({ field }) => (
+                    <FormItem className="space-y-1.5">
+                      <FormLabel className="text-xs font-semibold">Serial Number</FormLabel>
+                      <FormControl>
+                        <Input placeholder="SN-..." className="h-9 text-sm" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 <FormField
                   control={form.control as any}
                   name="condition"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Condition</FormLabel>
+                    <FormItem className="space-y-1.5">
+                      <FormLabel className="text-xs font-semibold">Condition</FormLabel>
                       <Select onValueChange={field.onChange} defaultValue={field.value}>
                         <FormControl>
-                          <SelectTrigger>
+                          <SelectTrigger className="h-9 text-sm">
                             <SelectValue placeholder="Select condition" />
                           </SelectTrigger>
                         </FormControl>
@@ -207,71 +285,62 @@ export function AssetForm() {
                   )}
                 />
 
+                {/* Row 3 */}
                 <FormField
                   control={form.control as any}
-                  name="brand"
+                  name="assigned_to"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Brand</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. Dell" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                    <FormItem className="space-y-1.5">
+                      <FormLabel className="text-xs font-semibold">Assigned Employee</FormLabel>
+                      <Select 
+                        onValueChange={(val) => {
+                          field.onChange(val);
+                          if (val && val !== 'unassigned') {
+                            const selectedEmp = employees.find((e: any) => e.id === val);
+                            if (selectedEmp) {
+                              // Auto-fill Business Unit
+                              const matchedUnit = units.find(
+                                (u: any) => u.id === selectedEmp.unit_id || 
+                                            (u.name && selectedEmp.unit?.name && u.name.toLowerCase() === selectedEmp.unit.name.toLowerCase())
+                              );
+                              const unitName = matchedUnit?.name || selectedEmp.unit?.name;
+                              if (unitName) {
+                                form.setValue('unit', unitName, { shouldValidate: true, shouldDirty: true });
+                              }
 
-                <FormField
-                  control={form.control as any}
-                  name="model"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Model</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. XPS 15 9500" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                              // Auto-fill Department
+                              const matchedDept = departments.find(
+                                (d: any) => d.id === selectedEmp.department_id || 
+                                            (d.name && selectedEmp.department?.name && d.name.toLowerCase() === selectedEmp.department.name.toLowerCase())
+                              );
+                              const deptName = matchedDept?.name || selectedEmp.department?.name;
+                              if (deptName) {
+                                form.setValue('department', deptName, { shouldValidate: true, shouldDirty: true });
+                              }
 
-                <FormField
-                  control={form.control as any}
-                  name="serial_number"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Serial Number</FormLabel>
-                      <FormControl>
-                        <Input placeholder="SN-..." {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control as any}
-                  name="purchase_date"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Purchase Date</FormLabel>
-                      <FormControl>
-                        <Input type="date" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control as any}
-                  name="purchase_cost"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Purchase Cost ($)</FormLabel>
-                      <FormControl>
-                        <Input type="number" step="0.01" {...field} />
-                      </FormControl>
+                              // Auto-switch status to 'Assigned' if it is currently 'Available'
+                              if (form.getValues('status') === 'Available') {
+                                form.setValue('status', 'Assigned', { shouldValidate: true, shouldDirty: true });
+                              }
+                            }
+                          }
+                        }} 
+                        value={field.value || ''}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue placeholder="Select employee (optional)" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="unassigned">None (Unassigned)</SelectItem>
+                          {employees.map((emp: any) => (
+                            <SelectItem key={emp.id} value={emp.id}>
+                              {emp.employee_id ? `${emp.employee_id} - ${emp.full_name}` : emp.full_name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -281,11 +350,11 @@ export function AssetForm() {
                   control={form.control as any}
                   name="unit"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Business Unit</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                    <FormItem className="space-y-1.5">
+                      <FormLabel className="text-xs font-semibold">Business Unit</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || ''}>
                         <FormControl>
-                          <SelectTrigger>
+                          <SelectTrigger className="h-9 text-sm">
                             <SelectValue placeholder="Select Unit" />
                           </SelectTrigger>
                         </FormControl>
@@ -304,11 +373,11 @@ export function AssetForm() {
                   control={form.control as any}
                   name="department"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Department</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                    <FormItem className="space-y-1.5">
+                      <FormLabel className="text-xs font-semibold">Department</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || ''}>
                         <FormControl>
-                          <SelectTrigger>
+                          <SelectTrigger className="h-9 text-sm">
                             <SelectValue placeholder="Select Department" />
                           </SelectTrigger>
                         </FormControl>
@@ -322,27 +391,88 @@ export function AssetForm() {
                     </FormItem>
                   )}
                 />
+
+                <FormField
+                  control={form.control as any}
+                  name="purchase_date"
+                  render={({ field }) => (
+                    <FormItem className="space-y-1.5">
+                      <FormLabel className="text-xs font-semibold">Purchase Date</FormLabel>
+                      <FormControl>
+                        <Input type="date" className="h-9 text-sm" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                {/* Row 4: Purchase cost, Warranty, Port Number */}
+                <FormField
+                  control={form.control as any}
+                  name="purchase_cost"
+                  render={({ field }) => (
+                    <FormItem className="space-y-1.5">
+                      <FormLabel className="text-xs font-semibold">Purchase Cost ($)</FormLabel>
+                      <FormControl>
+                        <Input type="number" step="0.01" placeholder="0.00" className="h-9 text-sm" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control as any}
+                  name="warranty"
+                  render={({ field }) => (
+                    <FormItem className="space-y-1.5">
+                      <FormLabel className="text-xs font-semibold">Warranty</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. 3 Years or 12/31/2026" className="h-9 text-sm" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control as any}
+                  name="port_number"
+                  render={({ field }) => (
+                    <FormItem className="space-y-1.5">
+                      <FormLabel className="text-xs font-semibold">Port Number</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. Port-A1" className="h-9 text-sm" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <div className="col-span-1 sm:col-span-2 lg:col-span-1"></div>
+
+                <div className="col-span-1 sm:col-span-2 lg:col-span-4">
+                  <FormField
+                    control={form.control as any}
+                    name="notes"
+                    render={({ field }) => (
+                      <FormItem className="space-y-1.5">
+                        <FormLabel className="text-xs font-semibold">Notes / Specs</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Additional information, configuration, accessories..." className="h-9 text-sm" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
               </div>
 
-              <FormField
-                control={form.control as any}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Notes / Specs</FormLabel>
-                    <FormControl>
-                      <Textarea placeholder="Additional information..." className="h-24" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <div className="flex justify-end space-x-4 pt-4 border-t">
-                <Button type="button" variant="outline" onClick={() => navigate('/assets')}>
+              <div className="flex justify-end space-x-3 pt-3 border-t">
+                <Button type="button" variant="outline" size="sm" onClick={() => navigate('/assets')}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={loading || form.formState.isSubmitting}>
+                <Button type="submit" size="sm" disabled={loading || form.formState.isSubmitting}>
                   {loading || form.formState.isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...</> : 'Create Asset'}
                 </Button>
               </div>

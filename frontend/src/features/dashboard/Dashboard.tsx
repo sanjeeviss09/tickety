@@ -13,6 +13,7 @@ import {
   useMyAssetsRealtime,
   useMyAwaitingConfirmations,
 } from './hooks/useEmployeeDashboard';
+import { useAdminAnalytics } from './hooks/useAdminAnalytics';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../../lib/api';
 
@@ -40,12 +41,12 @@ import { DistributionPieChart } from '../../components/analytics/DistributionPie
 import { SlaGaugeChart } from '../../components/analytics/SlaGaugeChart';
 import { TechnicianRankTable } from '../../components/analytics/TechnicianRankTable';
 import { TechnicianDashboard } from './TechnicianDashboard';
+import { ResolutionBreakdownDialog } from './components/ResolutionBreakdownDialog';
 
 // ─── Helper functions ──────────────────────────────────────────────────────
 const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
   'Open': { label: 'Open', bg: 'bg-blue-100', text: 'text-blue-800' },
   'Assigned': { label: 'Assigned', bg: 'bg-indigo-100', text: 'text-indigo-800' },
-  'Accepted': { label: 'Accepted', bg: 'bg-violet-100', text: 'text-violet-800' },
   'In Progress': { label: 'In Progress', bg: 'bg-purple-100', text: 'text-purple-800' },
   'Waiting for User': { label: 'Waiting for You', bg: 'bg-yellow-100', text: 'text-yellow-800' },
   'Resolved': { label: 'Resolved', bg: 'bg-green-100', text: 'text-green-800' },
@@ -404,7 +405,7 @@ export function EmployeeDashboard() {
                       <div className="shrink-0 pt-0.5">
                         <span className={cn(
                           'w-2 h-2 rounded-full inline-block mt-1.5',
-                          ['Open', 'Assigned', 'Accepted'].includes(ticket.status) ? 'bg-blue-500' :
+                          ['Open', 'Assigned'].includes(ticket.status) ? 'bg-blue-500' :
                             ticket.status === 'In Progress' ? 'bg-purple-500' :
                               ticket.status === 'Waiting for User' ? 'bg-yellow-500' :
                                 ticket.status === 'Resolved' ? 'bg-green-500' :
@@ -818,21 +819,16 @@ export function EmployeeDashboard() {
 export function AdminDashboard() {
   const { profile } = useAuthStore();
   const navigate = useNavigate();
-  const {
-    summary, ticketTrends, ticketDistribution, assetDistribution, technicianPerformance,
-    loading,
-    fetchSummary, fetchTicketTrends, fetchTicketDistribution, fetchAssetDistribution, fetchTechnicianPerformance
-  } = useAnalyticsStore();
-
   const isAdmin = profile?.roles?.name === 'Admin';
+  const { data, isLoading: loading } = useAdminAnalytics(isAdmin);
 
-  useEffect(() => {
-    fetchSummary();
-    fetchTicketTrends('month');
-    fetchTicketDistribution('status');
-    fetchAssetDistribution('status');
-    if (isAdmin) fetchTechnicianPerformance();
-  }, [profile?.id]);
+  const [resolutionBreakdownOpen, setResolutionBreakdownOpen] = useState(false);
+
+  const summary = data?.summary;
+  const ticketTrends = data?.ticketTrends || [];
+  const ticketDistribution = data?.ticketDistribution || [];
+  const assetDistribution = data?.assetDistribution || [];
+  const technicianPerformance = data?.technicianPerformance || [];
 
   const s = summary;
 
@@ -868,7 +864,17 @@ export function AdminDashboard() {
           <KpiCard title="SLA Compliance" value={s?.slaCompliance ?? '—'} format="percent" icon={<Shield className="h-5 w-5" />} colorClass="text-emerald-600" bgClass="bg-emerald-50" />
           <KpiCard title="SLA Breaches" value={s?.slaBreaches ?? '—'} icon={<AlertTriangle className="h-5 w-5" />} colorClass="text-orange-600" bgClass="bg-orange-50" onClick={() => navigate('/tickets?sla=breached')} />
           <KpiCard title="Overdue Tickets" value={s?.overdueTickets ?? '—'} icon={<AlertCircle className="h-5 w-5" />} colorClass="text-red-600" bgClass="bg-red-50" onClick={() => navigate('/tickets?sla=overdue')} />
-          <KpiCard title="Avg Resolution" value={s?.avgResolutionHours ?? '—'} format="hours" subtitle="Per resolved ticket" icon={<Timer className="h-5 w-5" />} colorClass="text-violet-600" bgClass="bg-violet-50" />
+          <KpiCard title="Avg Resolution" value={s?.avgResolutionHours ?? '—'} format="hours" subtitle="Per resolved ticket" icon={<Timer className="h-5 w-5" />} colorClass="text-violet-600" bgClass="bg-violet-50" onClick={() => setResolutionBreakdownOpen(true)} />
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Self-Service Deflection</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <KpiCard title="Total Attempts" value={s?.selfServiceEventsTotal ?? 0} icon={<BookOpen className="h-5 w-5" />} colorClass="text-blue-600" bgClass="bg-blue-50" />
+          <KpiCard title="Resolved (Deflected)" value={s?.selfServiceEventsSolved ?? 0} subtitle={s?.selfServiceEventsTotal ? `${Math.round((s.selfServiceEventsSolved / s.selfServiceEventsTotal) * 100)}% deflection rate` : '—'} icon={<CheckCircle className="h-5 w-5" />} colorClass="text-green-600" bgClass="bg-green-50" />
+          <KpiCard title="Escalated to Ticket" value={s?.selfServiceEventsEscalated ?? 0} icon={<Ticket className="h-5 w-5" />} colorClass="text-orange-600" bgClass="bg-orange-50" />
+          <KpiCard title="Skipped (No Time)" value={s?.selfServiceEventsSkipped ?? 0} icon={<AlertCircle className="h-5 w-5" />} colorClass="text-slate-600" bgClass="bg-slate-50" />
         </div>
       </div>
 
@@ -884,7 +890,7 @@ export function AdminDashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
-          <TicketTrendChart data={ticketTrends} onPeriodChange={fetchTicketTrends} loading={loading && ticketTrends.length === 0} />
+          <TicketTrendChart data={ticketTrends} onPeriodChange={() => {}} loading={loading && ticketTrends.length === 0} />
         </div>
         <SlaGaugeChart compliance={s?.slaCompliance ?? 100} subtitle="Overall SLA performance" />
       </div>
@@ -896,7 +902,7 @@ export function AdminDashboard() {
             { label: 'Status', value: 'status' }, { label: 'Priority', value: 'priority' },
             { label: 'Category', value: 'category' }, { label: 'Unit', value: 'unit' },
           ]}
-          onGroupByChange={fetchTicketDistribution}
+          onGroupByChange={() => {}}
           loading={loading && ticketDistribution.length === 0}
         />
         <DistributionPieChart
@@ -905,7 +911,7 @@ export function AdminDashboard() {
             { label: 'Status', value: 'status' }, { label: 'Category', value: 'category' },
             { label: 'Unit', value: 'unit' },
           ]}
-          onGroupByChange={fetchAssetDistribution}
+          onGroupByChange={() => {}}
           loading={loading && assetDistribution.length === 0}
         />
       </div>
@@ -913,6 +919,11 @@ export function AdminDashboard() {
       {isAdmin && (
         <TechnicianRankTable data={technicianPerformance} loading={loading && technicianPerformance.length === 0} />
       )}
+
+      <ResolutionBreakdownDialog
+        open={resolutionBreakdownOpen}
+        onOpenChange={setResolutionBreakdownOpen}
+      />
     </div>
   );
 }

@@ -51,13 +51,13 @@ export function UsersAccessSettings() {
           .select('*')
           .order('name', { ascending: true });
 
-        if (!error && data) return data;
+        if (!error && data) return data.filter((r: any) => r.name !== 'Assigner');
       } catch (e) {
         console.warn('Direct fetch fallback to API:', e);
       }
 
       const res = await api.get('/employees/roles');
-      return res.data.data || [];
+      return (res.data.data || []).filter((r: any) => r.name !== 'Assigner');
     },
     staleTime: 60000,
   });

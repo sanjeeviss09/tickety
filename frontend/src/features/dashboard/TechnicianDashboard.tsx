@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import api from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import {
   useTechnicianDashboardData,
@@ -18,7 +20,6 @@ import {
   useTechnicianStatusOverview,
   useTechnicianPriorityOverview,
   useAwaitingConfirmationTickets,
-  useAcceptTicket,
 } from './hooks/useTechnicianDashboard';
 
 import {
@@ -40,14 +41,16 @@ import {
   Search, ExternalLink, Shield, User, Building2, MapPin, Phone, Mail,
   CheckSquare, FileText, Monitor, WifiOff, PrinterIcon,
   ChevronLeft, Inbox, Zap, TrendingUp, Activity, ListChecks,
-  ArrowRight, Star, CheckCheck, XCircle, ClockAlert,
+  ArrowRight, Star, CheckCheck, XCircle, ClockAlert, Loader2,
 } from 'lucide-react';
+
+import { ResolutionBreakdownDialog } from './components/ResolutionBreakdownDialog';
+
 
 // ─── Shared constants ─────────────────────────────────────────────────────────
 const STATUS_CFG: Record<string, { label: string; bg: string; text: string }> = {
   'Open':                            { label: 'Open',             bg: 'bg-blue-100',   text: 'text-blue-800' },
   'Assigned':                        { label: 'Assigned',         bg: 'bg-indigo-100', text: 'text-indigo-800' },
-  'Accepted':                        { label: 'Accepted',         bg: 'bg-violet-100', text: 'text-violet-800' },
   'In Progress':                     { label: 'In Progress',      bg: 'bg-purple-100', text: 'text-purple-800' },
   'Waiting for User':                { label: 'Waiting',          bg: 'bg-yellow-100', text: 'text-yellow-800' },
   'Awaiting Employee Confirmation':   { label: 'Awaiting Confirm', bg: 'bg-orange-100', text: 'text-orange-800' },
@@ -230,7 +233,7 @@ function ActiveTicketTable() {
   const QUICK_FILTERS = [
     { label: 'All Active', value: undefined },
     { label: 'Critical', value: 'Critical' },
-    { label: 'Unaccepted', status: 'Assigned' },
+    { label: 'Assigned', status: 'Assigned' },
     { label: 'In Progress', status: 'In Progress' },
     { label: 'Waiting', status: 'Waiting for User' },
     { label: 'Overdue', value: 'overdue' },
@@ -371,10 +374,74 @@ function ActiveTicketTable() {
 export function TechnicianDashboard() {
   const { profile } = useAuthStore();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [kbSearch, setKbSearch] = useState('');
+  const [resolutionDialogOpen, setResolutionDialogOpen] = useState(false);
+  const [attendanceMessage, setAttendanceMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Realtime subscriptions
   useTechnicianTicketsRealtime();
+
+  // Attendance status for current technician
+  const { data: attendanceData } = useQuery({
+    queryKey: ['my-attendance-status', profile?.id],
+    queryFn: async () => {
+      const res = await api.get('/workforce/attendance/my-status');
+      return res.data?.data;
+    },
+    enabled: !!profile?.id,
+    refetchInterval: 30000,
+  });
+
+  const isCheckedIn = attendanceData?.status === 'Present' || attendanceData?.status === 'Late';
+  const isCheckedOut = attendanceData?.status === 'Checked Out';
+  const checkInTimeStr = attendanceData?.check_in_time ? new Date(attendanceData.check_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
+  const checkOutTimeStr = attendanceData?.check_out_time ? new Date(attendanceData.check_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
+  const shiftInfo = attendanceData?.shift ? `${attendanceData.shift.name} (${attendanceData.shift.start_time?.slice(0, 5)} - ${attendanceData.shift.end_time?.slice(0, 5)})` : 'Shift: 09:00 - 18:00';
+
+  const checkInMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.post('/workforce/attendance/check-in', { technician_id: profile?.id });
+      return res.data;
+    },
+    onSuccess: (res) => {
+      setAttendanceMessage({ type: 'success', text: res?.message || 'Checked In Successfully! You are now available for automatic assignments.' });
+      queryClient.invalidateQueries({ queryKey: ['my-attendance-status'] });
+      queryClient.invalidateQueries({ queryKey: ['workforce-attendance-today'] });
+      queryClient.invalidateQueries({ queryKey: ['workforce-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['tech-dashboard-data'] });
+      queryClient.invalidateQueries({ queryKey: ['tech-active-tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['tech-todays-work'] });
+      queryClient.invalidateQueries({ queryKey: ['tech-recent-assignments'] });
+      queryClient.invalidateQueries({ queryKey: ['tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['unit_queue'] });
+      queryClient.invalidateQueries({ queryKey: ['my_assigned_tickets'] });
+      setTimeout(() => setAttendanceMessage(null), 6000);
+    },
+    onError: (err: any) => {
+      const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to check in';
+      setAttendanceMessage({ type: 'error', text: msg });
+    }
+  });
+
+  const checkOutMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.post('/workforce/attendance/check-out', { technician_id: profile?.id });
+      return res.data;
+    },
+    onSuccess: (res) => {
+      setAttendanceMessage({ type: 'success', text: res?.message || 'Checked Out Successfully! Automatic assignments paused.' });
+      queryClient.invalidateQueries({ queryKey: ['my-attendance-status'] });
+      queryClient.invalidateQueries({ queryKey: ['workforce-attendance-today'] });
+      queryClient.invalidateQueries({ queryKey: ['workforce-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['tech-dashboard-data'] });
+      setTimeout(() => setAttendanceMessage(null), 6000);
+    },
+    onError: (err: any) => {
+      const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to check out';
+      setAttendanceMessage({ type: 'error', text: msg });
+    }
+  });
 
   // Data
   const { data: dashData, isLoading: dashLoading, error: dashError, refetch: refetchDash } = useTechnicianDashboardData();
@@ -394,7 +461,6 @@ export function TechnicianDashboard() {
 
   // Mutations
   const markRead = useMarkNotificationRead();
-  const acceptTicket = useAcceptTicket();
 
   const summary = dashData?.summary;
   const performance = dashData?.performance;
@@ -451,6 +517,96 @@ export function TechnicianDashboard() {
         </div>
       </div>
 
+      {/* ── Attendance Control ─────────────────────────────────────────── */}
+      <div className="bg-card rounded-xl border p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm border-indigo-200 bg-indigo-50/30">
+        <div className="space-y-1">
+          <h2 className="text-lg font-bold text-indigo-900 flex items-center gap-2">
+            <Clock className="h-5 w-5 text-indigo-600" /> Current Shift & Attendance
+          </h2>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Status:</span> 
+            <Badge 
+              variant="outline"
+              className={cn(
+                "font-semibold px-2 py-0.5 rounded border shadow-sm",
+                isCheckedIn && "bg-emerald-100 text-emerald-800 border-emerald-300",
+                isCheckedOut && "bg-slate-100 text-slate-700 border-slate-300",
+                !isCheckedIn && !isCheckedOut && "bg-white text-foreground border-gray-200"
+              )}
+            >
+              {attendanceData?.status || 'Not Checked In'}
+            </Badge>
+
+            {checkInTimeStr && (
+              <span className="text-xs text-emerald-700 font-medium">
+                · In at {checkInTimeStr}
+              </span>
+            )}
+            {checkOutTimeStr && (
+              <span className="text-xs text-slate-600 font-medium">
+                · Out at {checkOutTimeStr}
+              </span>
+            )}
+
+            <span className="ml-2 text-xs text-gray-500 border-l pl-2 border-gray-300">
+              {shiftInfo}
+            </span>
+          </div>
+
+          {attendanceMessage && (
+            <div className={cn(
+              "mt-2 text-xs font-medium px-3 py-1.5 rounded-lg border flex items-center gap-2 animate-in fade-in",
+              attendanceMessage.type === 'success' 
+                ? "bg-emerald-50 border-emerald-200 text-emerald-800" 
+                : "bg-destructive/10 border-destructive/20 text-destructive"
+            )}>
+              {attendanceMessage.type === 'success' ? <CheckCircle className="h-4 w-4 shrink-0 text-emerald-600" /> : <AlertTriangle className="h-4 w-4 shrink-0" />}
+              <span>{attendanceMessage.text}</span>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          <Button 
+            disabled={isCheckedIn || isCheckedOut || checkInMutation.isPending}
+            onClick={() => checkInMutation.mutate()} 
+            className={cn(
+              "font-bold px-6 py-6 h-auto text-lg rounded-xl shadow-md transition-all active:scale-95",
+              isCheckedIn 
+                ? "bg-emerald-600 hover:bg-emerald-600 text-white opacity-95 cursor-default" 
+                : "bg-indigo-600 hover:bg-indigo-700 text-white"
+            )}
+          >
+            {checkInMutation.isPending ? (
+              <>
+                <Loader2 className="mr-2 h-6 w-6 animate-spin" /> Checking In...
+              </>
+            ) : isCheckedIn ? (
+              <>
+                <CheckCircle className="mr-2 h-6 w-6 text-emerald-200" /> Checked In
+              </>
+            ) : (
+              <>
+                <CheckCircle className="mr-2 h-6 w-6" /> Check In Now
+              </>
+            )}
+          </Button>
+          <Button 
+            variant="outline" 
+            disabled={!isCheckedIn || checkOutMutation.isPending}
+            onClick={() => checkOutMutation.mutate()} 
+            className="px-6 py-6 h-auto text-lg rounded-xl transition-all active:scale-95"
+          >
+            {checkOutMutation.isPending ? (
+              <>
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Checking Out...
+              </>
+            ) : (
+              'Check Out'
+            )}
+          </Button>
+        </div>
+      </div>
+
       {/* ── Workload Summary Cards ──────────────────────────────────────── */}
       <div>
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">My Workload Summary</h2>
@@ -459,7 +615,7 @@ export function TechnicianDashboard() {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
             <WorkloadCard title="Total Assigned" value={summary?.totalAssigned ?? 0} icon={<Ticket className="h-4 w-4" />} colorClass="text-primary" bgClass="bg-primary/10" filterLink="/tickets?assigned_to=me" loading={dashLoading} />
-            <WorkloadCard title="Unaccepted" value={summary?.unaccepted ?? 0} icon={<Inbox className="h-4 w-4" />} colorClass="text-indigo-600" bgClass="bg-indigo-100" filterLink="/tickets?status=Assigned&assigned_to=me" loading={dashLoading} />
+            <WorkloadCard title="Assigned (New)" value={summary?.unaccepted ?? 0} icon={<Inbox className="h-4 w-4" />} colorClass="text-indigo-600" bgClass="bg-indigo-100" filterLink="/tickets?status=Assigned&assigned_to=me" loading={dashLoading} />
             <WorkloadCard title="In Progress" value={summary?.inProgress ?? 0} icon={<Activity className="h-4 w-4" />} colorClass="text-purple-600" bgClass="bg-purple-100" filterLink="/tickets?status=In+Progress&assigned_to=me" loading={dashLoading} />
             <WorkloadCard title="Waiting" value={summary?.waitingForUser ?? 0} icon={<AlertTriangle className="h-4 w-4" />} colorClass="text-yellow-700" bgClass="bg-yellow-100" filterLink="/tickets?status=Waiting+for+User&assigned_to=me" loading={dashLoading} />
             <WorkloadCard title="Resolved Today" value={summary?.resolvedToday ?? 0} icon={<CheckCircle className="h-4 w-4" />} colorClass="text-green-600" bgClass="bg-green-100" loading={dashLoading} />
@@ -683,8 +839,6 @@ export function TechnicianDashboard() {
                   <TicketRow
                     key={ticket.id}
                     ticket={ticket}
-                    showAccept
-                    onAccept={() => acceptTicket.mutate(ticket.id)}
                   />
                 ))}
               </div>
@@ -876,8 +1030,18 @@ export function TechnicianDashboard() {
                     { label: 'Currently Active', value: performance.pendingActive, suffix: 'tickets', color: 'text-purple-600' },
                     { label: 'Reopened', value: performance.reopened, suffix: 'tickets', color: performance.reopened > 0 ? 'text-orange-600' : 'text-green-600' },
                   ].map(({ label, value, suffix, color }) => (
-                    <div key={label} className="flex items-center justify-between py-2 border-b last:border-0">
-                      <span className="text-sm text-muted-foreground">{label}</span>
+                    <div
+                      key={label}
+                      className={cn(
+                        'flex items-center justify-between py-2 border-b last:border-0',
+                        label === 'Avg Resolution Time' && 'cursor-pointer hover:bg-muted/60 rounded px-1.5 -mx-1.5 transition-colors group'
+                      )}
+                      onClick={label === 'Avg Resolution Time' ? () => setResolutionDialogOpen(true) : undefined}
+                      title={label === 'Avg Resolution Time' ? 'Click to inspect individual tickets and resolution times' : undefined}
+                    >
+                      <span className={cn('text-sm text-muted-foreground', label === 'Avg Resolution Time' && 'group-hover:text-primary font-medium flex items-center gap-1')}>
+                        {label} {label === 'Avg Resolution Time' && <Timer className="h-3 w-3 inline opacity-60 group-hover:opacity-100" />}
+                      </span>
                       <span className={cn('text-sm font-bold', color)}>{value} <span className="text-xs font-normal text-muted-foreground">{suffix}</span></span>
                     </div>
                   ))}
@@ -1240,6 +1404,12 @@ export function TechnicianDashboard() {
           </Card>
         </div>
       </div>
+
+      <ResolutionBreakdownDialog
+        open={resolutionDialogOpen}
+        onOpenChange={setResolutionDialogOpen}
+        technicianId={profile?.id}
+      />
     </div>
   );
 }

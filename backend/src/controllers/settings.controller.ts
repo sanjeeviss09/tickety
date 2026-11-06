@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { z } from 'zod';
+import { sendEmail } from '../services/email.service';
 
 export const getSystemSettings = async (req: Request, res: Response) => {
   try {
@@ -159,28 +160,16 @@ export const testEmailTemplate = async (req: AuthenticatedRequest, res: Response
       return res.status(400).json({ status: 'error', message: 'Missing required fields for test email' });
     }
 
-    // We call the Supabase Edge Function to send the email securely
-    // This avoids needing the Resend API key in the backend
-    const { data, error } = await supabaseAdmin.functions.invoke('send-email', {
-      body: {
-        to: [to_email],
-        subject: subject,
-        html: html_body
-      }
+    // Call the platform's configured SMTP service
+    await sendEmail({
+      to: to_email,
+      subject: subject,
+      html: html_body
     });
-
-    if (error) {
-      console.error('Edge function error:', error);
-      throw new Error('Failed to invoke edge function');
-    }
-
-    if (data?.error) {
-       throw new Error(data.error.message || 'Error from email provider');
-    }
 
     res.status(200).json({ status: 'success', message: 'Test email sent successfully' });
   } catch (error: any) {
-    console.error('Error sending test email:', error);
-    res.status(500).json({ status: 'error', message: error.message });
+    console.error('Test email error:', error);
+    res.status(500).json({ status: 'error', message: error.message || 'Failed to send test email' });
   }
 };

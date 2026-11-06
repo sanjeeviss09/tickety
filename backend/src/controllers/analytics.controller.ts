@@ -20,11 +20,12 @@ export const getSummary = async (req: Request, res: Response) => {
     if (cached) return res.json({ status: 'success', data: cached, fromCache: true });
 
     // Ticket counts by status
-    const { data: tickets } = await supabaseAdmin.from('tickets').select('status, priority, created_at, resolution_date, due_date');
+    const { data: tickets } = await supabaseAdmin.from('tickets').select('status, priority, created_at, resolution_date, due_date, closed_at, updated_at, assignment_sla_state');
     const { data: assets } = await supabaseAdmin.from('assets').select('status');
     const { data: profiles } = await supabaseAdmin.from('profiles').select('id').eq('is_active', true);
     const { data: warranty } = await supabaseAdmin.from('asset_warranty').select('warranty_end_date, amc_end_date');
     const { data: slaConfig } = await supabaseAdmin.from('sla_configurations').select('priority, resolution_hours');
+    const { data: ssEvents } = await supabaseAdmin.from('ticket_self_service_events').select('outcome');
 
     const now = new Date();
     const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
@@ -36,10 +37,19 @@ export const getSummary = async (req: Request, res: Response) => {
       resolvedTickets: tickets?.filter(t => t.status === 'Resolved').length || 0,
       closedTickets: tickets?.filter(t => t.status === 'Closed').length || 0,
       criticalTickets: tickets?.filter(t => t.priority === 'Critical').length || 0,
-      overdueTickets: tickets?.filter(t => t.due_date && new Date(t.due_date) < now && !['Resolved', 'Closed'].includes(t.status)).length || 0,
+      overdueTickets: tickets?.filter(t => t.due_date && new Date(t.due_date) < now && !['Resolved', 'Closed', 'Cancelled'].includes(t.status)).length || 0,
       // SLA compliance (tickets resolved within SLA)
       slaCompliance: calculateSlaCompliance(tickets || [], slaConfig || []),
-      slaBreaches: tickets?.filter(t => t.due_date && new Date(t.due_date) < now && !['Resolved', 'Closed'].includes(t.status)).length || 0,
+      slaBreaches: tickets?.filter(t => {
+        if (t.assignment_sla_state === 'Breached') return true;
+        if (!t.due_date) return false;
+        const due = new Date(t.due_date);
+        if (!['Resolved', 'Closed', 'Cancelled'].includes(t.status)) {
+          return due < now;
+        }
+        const completedAt = t.resolution_date ? new Date(t.resolution_date) : (t.closed_at ? new Date(t.closed_at) : (t.updated_at ? new Date(t.updated_at) : null));
+        return completedAt ? completedAt > due : false;
+      }).length || 0,
       avgResolutionHours: calculateAvgResolution(tickets || []),
       activeAssets: assets?.filter(a => a.status === 'Assigned').length || 0,
       totalAssets: assets?.length || 0,
@@ -47,9 +57,13 @@ export const getSummary = async (req: Request, res: Response) => {
       activeEmployees: profiles?.length || 0,
       warrantyExpiringSoon: warranty?.filter(w => w.warranty_end_date && new Date(w.warranty_end_date) <= thirtyDaysFromNow && new Date(w.warranty_end_date) > now).length || 0,
       amcExpiringSoon: warranty?.filter(w => w.amc_end_date && new Date(w.amc_end_date) <= thirtyDaysFromNow && new Date(w.amc_end_date) > now).length || 0,
+      selfServiceEventsTotal: ssEvents?.length || 0,
+      selfServiceEventsSolved: ssEvents?.filter(e => e.outcome === 'solved').length || 0,
+      selfServiceEventsEscalated: ssEvents?.filter(e => e.outcome === 'escalated').length || 0,
+      selfServiceEventsSkipped: ssEvents?.filter(e => e.outcome === 'skipped').length || 0,
     };
 
-    setCache(cacheKey, summary, 300);
+    setCache(cacheKey, summary, 30);
     res.json({ status: 'success', data: summary });
   } catch (error: any) {
     res.status(500).json({ status: 'error', message: error.message });
@@ -483,3 +497,331 @@ export const getTechnicianDashboard = async (req: Request, res: Response) => {
     res.status(500).json({ status: 'error', message: error.message });
   }
 };
+
+// ── GET /api/v1/analytics/resolution-breakdown ─────────────────────
+export const getResolutionBreakdown = async (req: Request, res: Response) => {
+  try {
+    const { priority, technician_id, sla, search, sortBy = 'time_desc' } = req.query;
+
+    let query = supabaseAdmin
+      .from('tickets')
+      .select(`
+        id,
+        ticket_number,
+        subject,
+        status,
+        priority,
+        created_at,
+        resolution_date,
+        closed_at,
+        due_date,
+        updated_at,
+        work_started_at,
+        technician_completed_at,
+        total_work_duration_seconds,
+        ticket_categories (name),
+        assignee:profiles!tickets_assigned_to_fkey (id, full_name, email_address, profile_picture_url),
+        creator:profiles!tickets_created_by_fkey (id, full_name, email_address),
+        units (name),
+        departments (name)
+      `)
+      .in('status', ['Resolved', 'Closed']);
+
+    if (priority && priority !== 'All') {
+      query = query.eq('priority', priority as string);
+    }
+
+    if (technician_id && technician_id !== 'All') {
+      query = query.eq('assigned_to', technician_id as string);
+    }
+
+    if (search) {
+      query = query.or(`subject.ilike.%${search}%,ticket_number.ilike.%${search}%`);
+    }
+
+    const { data: rawTickets, error } = await query;
+    if (error) throw error;
+
+    // Calculate individual durations and SLA compliance
+    const enrichedTickets = (rawTickets || []).map((t: any) => {
+      const resolvedAt = t.resolution_date || t.closed_at || t.technician_completed_at || t.updated_at || t.created_at;
+      const createdAt = t.created_at;
+      const durationMs = new Date(resolvedAt).getTime() - new Date(createdAt).getTime();
+      const resolutionHours = Math.max(0, Math.round((durationMs / (1000 * 60 * 60)) * 10) / 10);
+
+      // Human readable formatted duration
+      let formattedDuration = '';
+      if (resolutionHours < 1) {
+        formattedDuration = `${Math.max(1, Math.round(resolutionHours * 60))}m`;
+      } else if (resolutionHours < 24) {
+        formattedDuration = `${resolutionHours}h`;
+      } else {
+        const days = Math.floor(resolutionHours / 24);
+        const remHours = Math.round((resolutionHours % 24) * 10) / 10;
+        formattedDuration = remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
+      }
+
+      // SLA check
+      let isBreached = false;
+      let slaStatus = 'Compliant';
+      if (t.due_date) {
+        const dueDate = new Date(t.due_date);
+        const completionDate = new Date(resolvedAt);
+        if (completionDate > dueDate) {
+          isBreached = true;
+          slaStatus = 'Breached';
+        }
+      } else {
+        slaStatus = 'No SLA';
+      }
+
+      const categoryName = Array.isArray(t.ticket_categories)
+        ? t.ticket_categories[0]?.name
+        : t.ticket_categories?.name || 'General';
+
+      const unitName = Array.isArray(t.units) ? t.units[0]?.name : t.units?.name;
+      const departmentName = Array.isArray(t.departments) ? t.departments[0]?.name : t.departments?.name;
+
+      return {
+        id: t.id,
+        ticket_number: t.ticket_number,
+        subject: t.subject,
+        status: t.status,
+        priority: t.priority,
+        created_at: createdAt,
+        resolved_at: resolvedAt,
+        due_date: t.due_date,
+        resolution_hours: resolutionHours,
+        resolution_formatted: formattedDuration,
+        is_breached: isBreached,
+        sla_status: slaStatus,
+        category: categoryName,
+        unit: unitName,
+        department: departmentName,
+        assignee: t.assignee,
+        creator: t.creator,
+        work_duration_seconds: t.total_work_duration_seconds || null,
+      };
+    });
+
+    // Apply SLA filter if requested
+    let filtered = enrichedTickets;
+    if (sla === 'breached') {
+      filtered = filtered.filter(t => t.is_breached);
+    } else if (sla === 'compliant') {
+      filtered = filtered.filter(t => !t.is_breached);
+    }
+
+    // Sort
+    if (sortBy === 'time_desc') {
+      filtered.sort((a, b) => b.resolution_hours - a.resolution_hours);
+    } else if (sortBy === 'time_asc') {
+      filtered.sort((a, b) => a.resolution_hours - b.resolution_hours);
+    } else if (sortBy === 'recent') {
+      filtered.sort((a, b) => new Date(b.resolved_at).getTime() - new Date(a.resolved_at).getTime());
+    } else if (sortBy === 'oldest') {
+      filtered.sort((a, b) => new Date(a.resolved_at).getTime() - new Date(b.resolved_at).getTime());
+    }
+
+    // Overall summary metrics
+    const totalCount = enrichedTickets.length;
+    const totalHours = enrichedTickets.reduce((sum, t) => sum + t.resolution_hours, 0);
+    const avgResolutionHours = totalCount > 0 ? Math.round((totalHours / totalCount) * 10) / 10 : 0;
+    const minResolutionHours = totalCount > 0 ? Math.min(...enrichedTickets.map(t => t.resolution_hours)) : 0;
+    const maxResolutionHours = totalCount > 0 ? Math.max(...enrichedTickets.map(t => t.resolution_hours)) : 0;
+    const compliantCount = enrichedTickets.filter(t => !t.is_breached).length;
+    const slaComplianceRate = totalCount > 0 ? Math.round((compliantCount / totalCount) * 100) : 100;
+
+    res.json({
+      status: 'success',
+      data: {
+        summary: {
+          totalResolved: totalCount,
+          avgResolutionHours,
+          minResolutionHours,
+          maxResolutionHours,
+          compliantCount,
+          breachedCount: totalCount - compliantCount,
+          slaComplianceRate,
+        },
+        tickets: filtered,
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+};
+
+// ── GET /api/v1/analytics/technician-performance/:id ─────────────────────
+// Detailed individual performance metrics and ticket scorecard for a specific technician
+export const getIndividualTechnicianPerformance = async (req: Request, res: Response) => {
+  try {
+    const techId = req.params.id || (req.query.technician_id as string);
+    if (!techId) return res.status(400).json({ status: 'error', message: 'Technician ID is required' });
+
+    // Fetch technician profile
+    const { data: profile, error: profErr } = await supabaseAdmin
+      .from('profiles')
+      .select('id, full_name, email_address, employee_id, profile_picture_url, employment_status, mobile_number, units(name), departments(name)')
+      .eq('id', techId)
+      .single();
+
+    if (profErr || !profile) {
+      return res.status(404).json({ status: 'error', message: 'Technician not found' });
+    }
+
+    // Fetch all tickets assigned to this technician
+    const { data: tickets, error: tickErr } = await supabaseAdmin
+      .from('tickets')
+      .select(`
+        id,
+        ticket_number,
+        subject,
+        status,
+        priority,
+        created_at,
+        due_date,
+        resolution_date,
+        closed_at,
+        updated_at,
+        work_started_at,
+        technician_completed_at,
+        total_work_duration_seconds,
+        ticket_categories (name),
+        units (name),
+        departments (name)
+      `)
+      .eq('assigned_to', techId)
+      .order('created_at', { ascending: false });
+
+    if (tickErr) throw tickErr;
+
+    const allTickets = tickets || [];
+    const activeStatuses = ['Open', 'Assigned', 'Accepted', 'In Progress', 'Waiting for User', 'Reopened'];
+    const now = new Date();
+
+    const resolved = allTickets.filter(t => ['Resolved', 'Closed'].includes(t.status));
+
+    // Enrich tickets with duration and SLA compliance
+    const enrichedTickets = allTickets.map((t: any) => {
+      const isCompleted = ['Resolved', 'Closed'].includes(t.status);
+      const resolvedAt = t.resolution_date || t.closed_at || t.technician_completed_at || t.updated_at;
+      let durationHours: number | null = null;
+      let durationFormatted: string | null = null;
+
+      if (isCompleted && resolvedAt) {
+        const diffMs = new Date(resolvedAt).getTime() - new Date(t.created_at).getTime();
+        durationHours = Math.max(0, Math.round((diffMs / 3_600_000) * 10) / 10);
+        if (durationHours < 1) {
+          durationFormatted = `${Math.max(1, Math.round(durationHours * 60))}m`;
+        } else if (durationHours < 24) {
+          durationFormatted = `${durationHours}h`;
+        } else {
+          const days = Math.floor(durationHours / 24);
+          const rem = Math.round((durationHours % 24) * 10) / 10;
+          durationFormatted = rem > 0 ? `${days}d ${rem}h` : `${days}d`;
+        }
+      }
+
+      let isBreached = false;
+      let slaStatus = 'Compliant';
+      if (t.due_date) {
+        const dueDate = new Date(t.due_date);
+        if (isCompleted && resolvedAt) {
+          if (new Date(resolvedAt) > dueDate) {
+            isBreached = true;
+            slaStatus = 'Breached';
+          }
+        } else if (activeStatuses.includes(t.status)) {
+          if (now > dueDate) {
+            isBreached = true;
+            slaStatus = 'Overdue';
+          } else {
+            slaStatus = 'On Track';
+          }
+        }
+      } else {
+        slaStatus = 'No SLA';
+      }
+
+      const catName = Array.isArray(t.ticket_categories) ? t.ticket_categories[0]?.name : t.ticket_categories?.name || 'General';
+      const unitName = Array.isArray(t.units) ? t.units[0]?.name : t.units?.name;
+      const deptName = Array.isArray(t.departments) ? t.departments[0]?.name : t.departments?.name;
+
+      return {
+        id: t.id,
+        ticket_number: t.ticket_number,
+        subject: t.subject,
+        status: t.status,
+        priority: t.priority,
+        category: catName,
+        unit: unitName,
+        department: deptName,
+        created_at: t.created_at,
+        due_date: t.due_date,
+        resolved_at: resolvedAt,
+        duration_hours: durationHours,
+        duration_formatted: durationFormatted,
+        is_breached: isBreached,
+        sla_status: slaStatus,
+      };
+    });
+
+    // Calculate metrics
+    const totalAssigned = allTickets.length;
+    const totalResolved = resolved.length;
+    const currentlyActive = allTickets.filter(t => activeStatuses.includes(t.status)).length;
+    const inProgress = allTickets.filter(t => t.status === 'In Progress').length;
+    const overdue = allTickets.filter(t => activeStatuses.includes(t.status) && t.due_date && new Date(t.due_date) < now).length;
+    const critical = allTickets.filter(t => t.priority === 'Critical' && activeStatuses.includes(t.status)).length;
+
+    const totalResHours = enrichedTickets
+      .filter(t => t.duration_hours !== null)
+      .reduce((sum, t) => sum + (t.duration_hours || 0), 0);
+    const avgResolutionHours = totalResolved > 0 ? Math.round((totalResHours / totalResolved) * 10) / 10 : 0;
+
+    const resolvedWithSla = enrichedTickets.filter(t => ['Resolved', 'Closed'].includes(t.status) && t.due_date);
+    const compliantCount = resolvedWithSla.filter(t => !t.is_breached).length;
+    const slaCompliance = resolvedWithSla.length > 0 ? Math.round((compliantCount / resolvedWithSla.length) * 100) : 100;
+
+    // Status distribution
+    const statusCounts: Record<string, number> = {};
+    allTickets.forEach(t => {
+      statusCounts[t.status] = (statusCounts[t.status] || 0) + 1;
+    });
+
+    // Priority distribution
+    const priorityCounts: Record<string, number> = { Critical: 0, High: 0, Medium: 0, Low: 0 };
+    allTickets.forEach(t => {
+      if (t.priority && priorityCounts[t.priority] !== undefined) {
+        priorityCounts[t.priority] = (priorityCounts[t.priority] || 0) + 1;
+      }
+    });
+
+    res.json({
+      status: 'success',
+      data: {
+        profile,
+        metrics: {
+          totalAssigned,
+          totalResolved,
+          currentlyActive,
+          inProgress,
+          overdue,
+          critical,
+          avgResolutionHours,
+          slaCompliance,
+          compliantCount,
+          breachedCount: resolvedWithSla.length - compliantCount,
+        },
+        statusDistribution: Object.entries(statusCounts).map(([status, count]) => ({ status, count })),
+        priorityDistribution: Object.entries(priorityCounts).map(([priority, count]) => ({ priority, count })),
+        tickets: enrichedTickets,
+      }
+    });
+  } catch (error: any) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+};
+
+

@@ -26,6 +26,9 @@ export function ImportEmployees() {
         email: 'john@example.com',
         mobile: '1234567890',
         designation: 'Software Engineer',
+        unit: 'R&D',
+        department: 'IT',
+        location: 'HQ Floor 2',
         employment_status: 'Active'
       }
     ]);

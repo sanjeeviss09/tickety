@@ -1,5 +1,3 @@
-import { useEffect } from 'react';
-import { useAnalyticsStore } from '../../../store/analyticsStore';
 import { TicketTrendChart } from '../../../components/analytics/TicketTrendChart';
 import { DistributionPieChart } from '../../../components/analytics/DistributionPieChart';
 import { DistributionBarChart } from '../../../components/analytics/DistributionBarChart';
@@ -7,21 +5,13 @@ import { TechnicianRankTable } from '../../../components/analytics/TechnicianRan
 import { KpiCard } from '../../../components/analytics/KpiCard';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Activity, BarChart2, Users, Building2 } from 'lucide-react';
+import { useAnalyticsPage } from '../hooks/useAnalyticsPage';
 
 export function AnalyticsPage() {
   const {
     kpis, ticketTrends, ticketDistribution, assetDistribution, technicianPerformance, departmentStats, loading,
-    fetchKpis, fetchTicketTrends, fetchTicketDistribution, fetchAssetDistribution, fetchTechnicianPerformance, fetchDepartmentStats
-  } = useAnalyticsStore();
-
-  useEffect(() => {
-    fetchKpis();
-    fetchTicketTrends('month');
-    fetchTicketDistribution('status');
-    fetchAssetDistribution('status');
-    fetchTechnicianPerformance();
-    fetchDepartmentStats();
-  }, []);
+    setTicketPeriod, setTicketGroupBy, setAssetGroupBy
+  } = useAnalyticsPage();
 
   return (
     <div className="space-y-6">
@@ -50,7 +40,7 @@ export function AnalyticsPage() {
 
         {/* ── Tickets Tab ── */}
         <TabsContent value="tickets" className="space-y-6 mt-6">
-          <TicketTrendChart data={ticketTrends} onPeriodChange={fetchTicketTrends} loading={loading && ticketTrends.length === 0} />
+          <TicketTrendChart data={ticketTrends} onPeriodChange={setTicketPeriod} loading={loading && ticketTrends.length === 0} />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <DistributionPieChart
               data={ticketDistribution}
@@ -64,7 +54,7 @@ export function AnalyticsPage() {
                 { label: 'Department', value: 'department' },
                 { label: 'Technician', value: 'technician' },
               ]}
-              onGroupByChange={fetchTicketDistribution}
+              onGroupByChange={setTicketGroupBy}
             />
             <DistributionBarChart
               data={ticketDistribution}
@@ -76,7 +66,7 @@ export function AnalyticsPage() {
                 { label: 'Unit', value: 'unit' },
                 { label: 'Technician', value: 'technician' },
               ]}
-              onGroupByChange={fetchTicketDistribution}
+              onGroupByChange={setTicketGroupBy}
               horizontal
             />
           </div>
@@ -94,7 +84,7 @@ export function AnalyticsPage() {
                 { label: 'Unit', value: 'unit' },
                 { label: 'Department', value: 'department' },
               ]}
-              onGroupByChange={fetchAssetDistribution}
+              onGroupByChange={setAssetGroupBy}
             />
             <DistributionBarChart
               data={assetDistribution}
@@ -104,7 +94,7 @@ export function AnalyticsPage() {
                 { label: 'Category', value: 'category' },
                 { label: 'Unit', value: 'unit' },
               ]}
-              onGroupByChange={fetchAssetDistribution}
+              onGroupByChange={setAssetGroupBy}
             />
           </div>
         </TabsContent>
@@ -113,7 +103,7 @@ export function AnalyticsPage() {
         <TabsContent value="technicians" className="space-y-6 mt-6">
           <TechnicianRankTable data={technicianPerformance} loading={loading && technicianPerformance.length === 0} />
           <DistributionBarChart
-            data={technicianPerformance.map(t => ({ name: t.name, value: t.resolved }))}
+            data={technicianPerformance.map((t: any) => ({ name: t.name, value: t.resolved }))}
             title="Tickets Resolved by Technician"
             subtitle="Top performers"
             horizontal
@@ -123,7 +113,7 @@ export function AnalyticsPage() {
         {/* ── Departments Tab ── */}
         <TabsContent value="departments" className="space-y-6 mt-6">
           <DistributionBarChart
-            data={departmentStats.map(d => ({ name: d.name, value: d.totalTickets }))}
+            data={departmentStats.map((d: any) => ({ name: d.name, value: d.totalTickets }))}
             title="Tickets by Department"
             horizontal
           />
@@ -139,7 +129,7 @@ export function AnalyticsPage() {
                 </tr>
               </thead>
               <tbody>
-                {departmentStats.map(d => (
+                {departmentStats.map((d: any) => (
                   <tr key={d.name} className="border-t hover:bg-muted/30 transition-colors">
                     <td className="px-5 py-3 font-medium">{d.name}</td>
                     <td className="px-5 py-3 text-right">{d.totalTickets}</td>

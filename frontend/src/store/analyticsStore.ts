@@ -18,6 +18,10 @@ interface AnalyticsSummary {
   activeEmployees: number;
   warrantyExpiringSoon: number;
   amcExpiringSoon: number;
+  selfServiceEventsTotal: number;
+  selfServiceEventsSolved: number;
+  selfServiceEventsEscalated: number;
+  selfServiceEventsSkipped: number;
 }
 
 interface KpiData {

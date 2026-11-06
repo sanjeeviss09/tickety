@@ -14,8 +14,9 @@ import {
   useMyAwaitingConfirmations,
 } from './hooks/useEmployeeDashboard';
 import { useAdminAnalytics } from './hooks/useAdminAnalytics';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../../lib/api';
+import { supabase } from '../../lib/supabase';
 
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -819,10 +820,44 @@ export function EmployeeDashboard() {
 export function AdminDashboard() {
   const { profile } = useAuthStore();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const isAdmin = profile?.roles?.name === 'Admin';
   const { data, isLoading: loading } = useAdminAnalytics(isAdmin);
 
   const [resolutionBreakdownOpen, setResolutionBreakdownOpen] = useState(false);
+
+  const { data: reopenedTickets = [] } = useQuery({
+    queryKey: ['admin-reopened-tickets'],
+    queryFn: async () => {
+      const { data: rows, error } = await supabase
+        .from('tickets')
+        .select(`
+          id, ticket_number, subject, priority, status, reopened_at, reopen_count, updated_at,
+          creator:profiles!tickets_created_by_fkey(full_name),
+          assignee:profiles!tickets_assigned_to_fkey(full_name),
+          confirmations:ticket_resolution_confirmations(status, rejection_reason, responded_at)
+        `)
+        .eq('status', 'Reopened')
+        .order('reopened_at', { ascending: false, nullsFirst: false });
+      if (error) throw error;
+      return rows ?? [];
+    },
+    refetchInterval: 15_000,
+  });
+
+  const { data: adminNotifications = [] } = useQuery({
+    queryKey: ['notifications'],
+    queryFn: async () => {
+      const res = await api.get('/notifications');
+      return res.data?.data ?? [];
+    },
+    refetchInterval: 15_000,
+  });
+
+  const markNotifRead = useMutation({
+    mutationFn: async (id: string) => await api.patch(`/notifications/${id}/read`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+  });
 
   const summary = data?.summary;
   const ticketTrends = data?.ticketTrends || [];
@@ -847,12 +882,81 @@ export function AdminDashboard() {
         </div>
       </div>
 
+      {/* ── Reopened / Rejected by Employee Alert Banner (Admin) ─────────── */}
+      {reopenedTickets.length > 0 && (
+        <Card className="border-red-300 shadow-md">
+          <CardHeader className="bg-gradient-to-r from-red-50 to-orange-50 rounded-t-lg border-b border-red-200 pb-4">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div>
+                <CardTitle className="text-red-900 flex items-center gap-2 text-lg">
+                  <AlertCircle className="h-5 w-5 text-red-600" /> Reopened Tickets — Rejected by Employee
+                </CardTitle>
+                <p className="text-sm text-red-700 mt-1">
+                  Employees reported that the following ticket(s) were not resolved and rejected the resolution.
+                </p>
+              </div>
+              <Badge variant="outline" className="bg-white text-red-700 border-red-300 font-bold">
+                {reopenedTickets.length} Reopened
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y border-t border-red-100">
+              {reopenedTickets.map((ticket: any) => {
+                const latestRejected = Array.isArray(ticket.confirmations)
+                  ? [...ticket.confirmations].reverse().find((c: any) => c.status === 'Rejected' && c.rejection_reason)
+                  : null;
+                const empName = (Array.isArray(ticket.creator) ? ticket.creator[0]?.full_name : ticket.creator?.full_name) || 'Employee';
+                const techName = (Array.isArray(ticket.assignee) ? ticket.assignee[0]?.full_name : ticket.assignee?.full_name) || 'Unassigned';
+                return (
+                  <div key={ticket.id} className="p-4 hover:bg-red-50/40 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="space-y-1.5 flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Link to={`/tickets/${ticket.id}`} className="font-semibold text-base hover:underline text-red-900">
+                          {ticket.ticket_number}: {ticket.subject}
+                        </Link>
+                        <StatusBadge status={ticket.status} />
+                        <span className={cn('text-xs font-semibold', PRIORITY_CONFIG[ticket.priority]?.color)}>
+                          {ticket.priority}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+                        <span className="flex items-center gap-1">
+                          <User className="h-3.5 w-3.5" /> Employee: <strong className="text-foreground">{empName}</strong>
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Wrench className="h-3.5 w-3.5" /> Technician: <strong className="text-foreground">{techName}</strong>
+                        </span>
+                        {ticket.reopened_at && (
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3.5 w-3.5" /> Reopened {new Date(ticket.reopened_at).toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+                      {latestRejected?.rejection_reason && (
+                        <div className="text-xs bg-red-50 border border-red-200 text-red-800 rounded-md px-3 py-2 mt-1">
+                          <span className="font-semibold">Employee Rejection Reason:</span> "{latestRejected.rejection_reason.trim()}"
+                        </div>
+                      )}
+                    </div>
+                    <Button onClick={() => navigate(`/tickets/${ticket.id}`)} className="bg-red-600 hover:bg-red-700 text-white whitespace-nowrap shrink-0">
+                      View Ticket
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div>
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Ticket Overview</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
           <KpiCard title="Total Tickets" value={s?.totalTickets ?? '—'} icon={<Ticket className="h-5 w-5" />} colorClass="text-primary" bgClass="bg-primary/10" onClick={() => navigate('/tickets')} />
           <KpiCard title="Open" value={s?.openTickets ?? '—'} subtitle="Waiting for action" icon={<Clock className="h-5 w-5" />} colorClass="text-blue-600" bgClass="bg-blue-50" onClick={() => navigate('/tickets?status=Open')} />
           <KpiCard title="In Progress" value={s?.inProgressTickets ?? '—'} icon={<Timer className="h-5 w-5" />} colorClass="text-indigo-600" bgClass="bg-indigo-50" onClick={() => navigate('/tickets?status=In Progress')} />
+          <KpiCard title="Reopened" value={s?.reopenedTickets ?? reopenedTickets.length} subtitle="Rejected by employee" icon={<RefreshCw className="h-5 w-5" />} colorClass="text-red-600" bgClass="bg-red-50" onClick={() => navigate('/tickets?status=Reopened')} />
           <KpiCard title="Resolved / Closed" value={(s?.resolvedTickets ?? 0) + (s?.closedTickets ?? 0)} icon={<CheckCircle className="h-5 w-5" />} colorClass="text-green-600" bgClass="bg-green-50" onClick={() => navigate('/tickets?status=Resolved,Closed')} />
           <KpiCard title="Critical" value={s?.criticalTickets ?? '—'} subtitle="Requires immediate attention" icon={<AlertTriangle className="h-5 w-5" />} colorClass="text-red-600" bgClass="bg-red-50" onClick={() => navigate('/tickets?priority=Critical')} />
         </div>
@@ -919,6 +1023,50 @@ export function AdminDashboard() {
       {isAdmin && (
         <TechnicianRankTable data={technicianPerformance} loading={loading && technicianPerformance.length === 0} />
       )}
+
+      {/* ── Recent System & Admin Notifications ─────────────────────────── */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
+          <CardTitle className="text-base font-semibold flex items-center gap-2">
+            <Bell className="h-4 w-4 text-blue-600" /> Recent Notifications & Alerts
+            {adminNotifications.filter((n: any) => !n.is_read).length > 0 && (
+              <span className="h-5 w-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                {adminNotifications.filter((n: any) => !n.is_read).length}
+              </span>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {adminNotifications.length === 0 ? (
+            <EmptyState icon={Bell} title="No notifications" description="System alerts, reopened ticket notifications, and SLA escalations will appear here." />
+          ) : (
+            <div className="divide-y">
+              {adminNotifications.slice(0, 8).map((n: any) => (
+                <div
+                  key={n.id}
+                  className={cn(
+                    'flex items-start gap-3 py-3 px-2 -mx-2 rounded-md cursor-pointer hover:bg-muted/40 transition-colors',
+                    !n.is_read && 'bg-blue-50/50'
+                  )}
+                  onClick={() => {
+                    if (!n.is_read) markNotifRead.mutate(n.id);
+                    if (n.link) navigate(n.link);
+                  }}
+                >
+                  <div className={cn('w-2 h-2 rounded-full mt-2 shrink-0', !n.is_read ? 'bg-blue-500' : 'bg-transparent border border-muted-foreground/30')} />
+                  <div className="flex-1 min-w-0">
+                    <p className={cn('text-sm', !n.is_read ? 'font-semibold' : 'font-medium')}>{n.title}</p>
+                    <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{n.message}</p>
+                    <span className="text-[10px] text-muted-foreground mt-1 block">
+                      {new Date(n.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <ResolutionBreakdownDialog
         open={resolutionBreakdownOpen}

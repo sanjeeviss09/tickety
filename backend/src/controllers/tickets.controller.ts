@@ -2,7 +2,9 @@ import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 import { z } from 'zod';
 import { sendEmail } from '../services/email.service';
+import { notifyAndEmail, getAdminProfileIds } from '../services/notifications.service';
 import { handleSlaStatusTransition } from './ticketWorkflow.controller';
+import { clearAnalyticsCache } from './analytics.controller';
 
 const optionalUuid = z.preprocess(
   (val) => (val === '' || val === undefined || val === 'none' ? null : val),
@@ -47,7 +49,7 @@ export const createTicket = async (req: Request, res: Response) => {
       .select('id, unit_id, department_id, email_address, full_name')
       .or(`id.eq.${authUserId},auth_user_id.eq.${authUserId}`)
       .single();
-      
+
     if (profileErr || !profile) {
       return res.status(400).json({ status: 'error', message: 'User profile not found' });
     }
@@ -70,7 +72,7 @@ export const createTicket = async (req: Request, res: Response) => {
     // Use affected profile unit and department if not explicitly provided
     let finalUnitId = ticketData.unit_id || affectedProfile.unit_id || null;
     const finalDeptId = ticketData.department_id || affectedProfile.department_id || null;
-    
+
     if (!finalUnitId && finalDeptId) {
       const { data: dept } = await supabaseAdmin
         .from('departments')
@@ -81,7 +83,7 @@ export const createTicket = async (req: Request, res: Response) => {
         finalUnitId = dept.unit_id;
       }
     }
-    
+
     // Auto-assign priority based on category if not provided
     let finalPriority = ticketData.priority;
     if (!finalPriority) {
@@ -117,10 +119,10 @@ export const createTicket = async (req: Request, res: Response) => {
 
     // SLA Matching and Calculation
     const matchedPolicy = await matchSlaPolicy(ticket.unit_id, ticket.category_id, ticket.priority);
-    
+
     if (matchedPolicy) {
       const { firstResponseDueAt, resolutionDueAt } = await calculateSlaDeadlines(
-        matchedPolicy.id, 
+        matchedPolicy.id,
         new Date(ticket.created_at)
       );
 
@@ -169,7 +171,7 @@ export const createTicket = async (req: Request, res: Response) => {
       action_type: 'CREATED',
       message: ticket_for === 'another' ? `Ticket created on behalf of ${affectedProfile.full_name}` : 'Ticket created',
     }];
-    
+
     if (attachments && attachments.length > 0) {
       for (const att of attachments) {
         timelineEvents.push({
@@ -180,7 +182,7 @@ export const createTicket = async (req: Request, res: Response) => {
         });
       }
     }
-    
+
     await supabaseAdmin.from('ticket_timeline').insert(timelineEvents);
 
     // Attempt automatic routing
@@ -222,10 +224,10 @@ export const getTickets = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
     const role = req.user?.role;
-    
+
     const page = parseInt(req.query.page as string) || 0;
     const limit = parseInt(req.query.limit as string) || 20;
-    
+
     let query = supabaseAdmin
       .from('tickets')
       .select(`
@@ -237,18 +239,18 @@ export const getTickets = async (req: Request, res: Response) => {
         assignee:profiles!tickets_assigned_to_fkey (full_name, email_address, profile_picture_url),
         assets:asset_ticket_mapping (asset:assets (id, name, asset_code))
       `, { count: 'exact' });
-      
+
     // RLS in backend
     if (role === 'Employee') {
       query = query.or(`created_by.eq.${userId},requester_id.eq.${userId},affected_employee_id.eq.${userId}`);
-    } 
+    }
 
     // Apply filters from query params
     if (req.query.status && req.query.status !== 'All') {
       const statuses = (req.query.status as string).split(',');
       query = query.in('status', statuses);
     }
-    
+
     if (req.query.priority && req.query.priority !== 'All') {
       const priorities = (req.query.priority as string).split(',');
       query = query.in('priority', priorities);
@@ -295,7 +297,7 @@ export const getTickets = async (req: Request, res: Response) => {
         }
       }
     }
-    
+
     // Sort and Paginate
     query = query
       .order('created_at', { ascending: false })
@@ -303,7 +305,7 @@ export const getTickets = async (req: Request, res: Response) => {
 
     const { data, count, error } = await query;
     if (error) throw error;
-    
+
     if (data && data.length > 0) {
       const profileIds = new Set<string>();
       for (const t of data) {
@@ -351,7 +353,7 @@ export const getTicketById = async (req: Request, res: Response) => {
       .single();
 
     if (error) throw error;
-    
+
     if (data) {
       const profileIds = [data.requester_id, data.affected_employee_id].filter(Boolean);
       if (profileIds.length > 0) {
@@ -365,7 +367,7 @@ export const getTicketById = async (req: Request, res: Response) => {
         }
       }
     }
-    
+
     // Role check
     if (req.user?.role === 'Employee' && data.created_by !== req.user.id && data.requester_id !== req.user.id && data.affected_employee_id !== req.user.id) {
       return res.status(403).json({ status: 'error', message: 'Forbidden' });
@@ -391,11 +393,16 @@ export const updateTicketStatus = async (req: Request, res: Response) => {
       return res.json({ status: 'success', data: oldTicket });
     }
 
+    const nowIso = new Date().toISOString();
     const { data: ticket, error } = await supabaseAdmin
       .from('tickets')
-      .update({ status, ...(status === 'Resolved' || status === 'Closed' ? { resolution_date: new Date().toISOString() } : {}) })
+      .update({
+        status,
+        ...(status === 'Resolved' || status === 'Closed' ? { resolution_date: nowIso } : {}),
+        ...(status === 'Reopened' ? { reopened_at: nowIso, reopen_count: (oldTicket.reopen_count || 0) + 1, active_work_session_id: null } : {}),
+      })
       .eq('id', id)
-      .select()
+      .select('*, creator:profiles!tickets_created_by_fkey(full_name), assignee:profiles!tickets_assigned_to_fkey(full_name)')
       .single();
 
     if (error) throw error;
@@ -411,6 +418,53 @@ export const updateTicketStatus = async (req: Request, res: Response) => {
     // Hook SLA pause/resume when transitioning to/from "Waiting for User"
     await handleSlaStatusTransition(id as string, oldTicket.status, status, userId!);
 
+    if (status === 'Reopened') {
+      const appUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const employeeName = (Array.isArray(ticket.creator) ? ticket.creator[0]?.full_name : ticket.creator?.full_name) || 'Employee';
+      const technicianName = (Array.isArray(ticket.assignee) ? ticket.assignee[0]?.full_name : ticket.assignee?.full_name) || 'Technician';
+      const reason = req.body.reason || req.body.rejection_reason || 'Ticket was reopened for further investigation';
+
+      if (ticket.assigned_to) {
+        await notifyAndEmail({
+          recipientProfileId: ticket.assigned_to,
+          eventName: 'Ticket Reopened Notification',
+          customTitle: `Ticket #${ticket.ticket_number} Reopened`,
+          customMessage: `Ticket "${ticket.subject}" (${employeeName}) has been reopened. Please review and resume work.`,
+          templateVars: {
+            ticket_number: ticket.ticket_number,
+            subject: ticket.subject,
+            technician_name: technicianName,
+            employee_name: employeeName,
+            rejection_reason: reason,
+            ticket_url: `${appUrl}/tickets/${id}`,
+            company_name: 'DeskPulse',
+          },
+          link: `/tickets/${id}`,
+        }).catch(() => {});
+      }
+
+      const adminIds = await getAdminProfileIds();
+      for (const adminId of adminIds) {
+        if (adminId === ticket.assigned_to) continue;
+        await notifyAndEmail({
+          recipientProfileId: adminId,
+          eventName: 'Ticket Reopened Notification',
+          customTitle: `[Admin Alert] Ticket #${ticket.ticket_number} Reopened`,
+          customMessage: `Ticket "${ticket.subject}" (${employeeName}, Assigned to: ${technicianName}) has been reopened.`,
+          templateVars: {
+            ticket_number: ticket.ticket_number,
+            subject: ticket.subject,
+            technician_name: 'Admin',
+            employee_name: employeeName,
+            rejection_reason: `${reason} (Assigned Technician: ${technicianName})`,
+            ticket_url: `${appUrl}/tickets/${id}`,
+            company_name: 'DeskPulse',
+          },
+          link: `/tickets/${id}`,
+        }).catch(() => {});
+      }
+    }
+
     await supabaseAdmin.from('audit_logs').insert([{
       user_id: userId,
       action: 'TICKET_STATUS_CHANGED',
@@ -419,6 +473,7 @@ export const updateTicketStatus = async (req: Request, res: Response) => {
       new_values: { status, is_admin_override: true }
     }]);
 
+    clearAnalyticsCache();
     res.json({ status: 'success', data: ticket });
   } catch (error: any) {
     res.status(500).json({ status: 'error', message: error.message });
@@ -428,12 +483,12 @@ export const updateTicketStatus = async (req: Request, res: Response) => {
 export const getEligibleTechnicians = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    
+
     const { data: ticket, error: tErr } = await supabaseAdmin.from('tickets').select('unit_id').eq('id', id).single();
     if (tErr) throw tErr;
-    
+
     const unitId = ticket?.unit_id;
-    
+
     if (!unitId) {
       const { data, error } = await supabaseAdmin
         .from('profiles')
@@ -448,16 +503,16 @@ export const getEligibleTechnicians = async (req: Request, res: Response) => {
     const assignedTechIds = assignments.map((a: any) => a.technician_id);
 
     let query = supabaseAdmin.from('profiles').select('*, role:roles(name)');
-    
+
     if (assignedTechIds.length > 0) {
       query = query.or(`unit_id.eq.${unitId},id.in.(${assignedTechIds.join(',')})`);
     } else {
       query = query.eq('unit_id', unitId);
     }
-    
+
     const { data, error } = await query;
     if (error) throw error;
-    
+
     const techs = data.filter((p: any) => p.role?.name === 'Technician');
     res.json({ status: 'success', data: techs });
   } catch (error: any) {
@@ -481,8 +536,8 @@ export const assignTicket = async (req: Request, res: Response) => {
 
     const { data: ticket, error } = await supabaseAdmin
       .from('tickets')
-      .update({ 
-        assigned_to: targetAssignee, 
+      .update({
+        assigned_to: targetAssignee,
         assigned_at: targetAssignee ? new Date().toISOString() : null,
         status: targetAssignee && oldTicket.status === 'Open' ? 'Assigned' : oldTicket.status
       })
@@ -598,7 +653,7 @@ export const deleteComment = async (req: Request, res: Response) => {
       .single();
 
     if (fetchError || !comment) {
-       return res.status(404).json({ status: 'error', message: 'Comment not found' });
+      return res.status(404).json({ status: 'error', message: 'Comment not found' });
     }
 
     if (comment.author_id !== userId && req.user?.role !== 'Admin') {
@@ -681,7 +736,7 @@ export const linkTicketAsset = async (req: Request, res: Response) => {
 export const deleteTicket = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    
+
     // Check permission (Admin only or Creator)
     const { data: ticket, error: fetchError } = await supabaseAdmin
       .from('tickets')
@@ -699,7 +754,7 @@ export const deleteTicket = async (req: Request, res: Response) => {
 
     const { error } = await supabaseAdmin.from('tickets').delete().eq('id', id);
     if (error) throw error;
-    
+
     res.json({ status: 'success', message: 'Ticket deleted successfully' });
   } catch (error: any) {
     res.status(500).json({ status: 'error', message: error.message });

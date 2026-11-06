@@ -59,6 +59,7 @@ export function MyAssignedTickets() {
       case 'Assigned': return 'bg-indigo-100 text-indigo-800';
       case 'In Progress': return 'bg-purple-100 text-purple-800';
       case 'Waiting for User': return 'bg-yellow-100 text-yellow-800';
+      case 'Reopened': return 'bg-red-100 text-red-800';
       case 'Resolved': return 'bg-green-100 text-green-800';
       case 'Closed': return 'bg-gray-100 text-gray-800';
       default: return 'bg-gray-100 text-gray-800';
@@ -76,10 +77,10 @@ export function MyAssignedTickets() {
 
       <Card>
         <CardHeader className="pb-4">
-          <div className="flex justify-between items-center">
+          <div className="flex flex-wrap justify-between items-center gap-2">
             <CardTitle className="text-lg">Active Workload</CardTitle>
-            <div className="flex space-x-2">
-              {['All', 'Assigned', 'In Progress', 'Waiting for User', 'Overdue'].map(f => (
+            <div className="flex flex-wrap gap-2">
+              {['All', 'Reopened', 'Assigned', 'In Progress', 'Waiting for User', 'Overdue'].map(f => (
                 <Button 
                   key={f} 
                   size="sm" 

@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 import { z } from 'zod';
-import { notifyAndEmail, notifyEscalationRecipients } from '../services/notifications.service';
+import { notifyAndEmail, notifyEscalationRecipients, getAdminProfileIds } from '../services/notifications.service';
 import { pauseSla, resumeSla, calculateSlaStatus, getTotalWorkDuration } from '../services/sla.service';
+import { clearAnalyticsCache } from './analytics.controller';
 
 const APP_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
@@ -24,7 +25,7 @@ async function getCallerProfile(req: Request): Promise<{ profileId: string; auth
   const { data } = await supabaseAdmin
     .from('profiles')
     .select('id')
-    .eq('auth_user_id', authId)
+    .or(`id.eq.${authId},auth_user_id.eq.${authId}`)
     .single();
   if (!data) return null;
   return { profileId: data.id as string, authId };
@@ -437,7 +438,9 @@ export const confirmResolution = async (req: Request, res: Response) => {
       .eq('id', id as string).single();
 
     if (!ticket) return res.status(404).json({ status: 'error', message: 'Ticket not found' });
-    if (ticket.created_by !== profileId) return res.status(403).json({ status: 'error', message: 'Only the ticket creator can confirm resolution' });
+    if (ticket.created_by !== profileId && ticket.requester_id !== profileId && ticket.affected_employee_id !== profileId) {
+      return res.status(403).json({ status: 'error', message: 'Only the ticket creator or affected employee can confirm resolution' });
+    }
     if (ticket.status !== 'Awaiting Employee Confirmation') {
       return res.status(400).json({ status: 'error', message: `Ticket is not awaiting confirmation. Status: "${ticket.status}"` });
     }
@@ -607,6 +610,7 @@ export const confirmResolution = async (req: Request, res: Response) => {
         new_values: { status: ticketUpdate.status, rating: validated.rating },
       }]);
 
+      clearAnalyticsCache();
       return res.json({ status: 'success', data: { status: ticketUpdate.status, rating: ratingRecord } });
     } else {
       // Employee rejected resolution
@@ -614,10 +618,14 @@ export const confirmResolution = async (req: Request, res: Response) => {
         return res.status(400).json({ status: 'error', message: 'Rejection reason is required' });
       }
 
+      const cleanReason = validated.rejection_reason.trim();
+      const employeeName = (Array.isArray(ticket.creator) ? ticket.creator[0]?.full_name : ticket.creator?.full_name) || 'Employee';
+      const technicianName = (Array.isArray(ticket.assignee) ? ticket.assignee[0]?.full_name : (ticket.assignee as any)?.full_name) || 'Technician';
+
       // Update confirmation
       await supabaseAdmin.from('ticket_resolution_confirmations').update({
         status: 'Rejected',
-        rejection_reason: validated.rejection_reason,
+        rejection_reason: cleanReason,
         responded_at: now,
       }).eq('id', confirmation.id);
 
@@ -633,8 +641,8 @@ export const confirmResolution = async (req: Request, res: Response) => {
       await supabaseAdmin.from('ticket_timeline').insert([{
         ticket_id: id as string, user_id: profileId,
         action_type: 'EMPLOYEE_REJECTED',
-        message: `Employee reported issue not resolved: ${validated.rejection_reason}`,
-        metadata: { rejection_reason: validated.rejection_reason, confirmation_id: confirmation.id },
+        message: `Employee reported issue not resolved: ${cleanReason}`,
+        metadata: { rejection_reason: cleanReason, confirmation_id: confirmation.id },
       }, {
         ticket_id: id as string, user_id: null as any,
         action_type: 'STATUS_CHANGE',
@@ -642,22 +650,46 @@ export const confirmResolution = async (req: Request, res: Response) => {
         metadata: { old_status: 'Awaiting Employee Confirmation', new_status: 'Reopened', reopen_count: (ticket.reopen_count || 0) + 1 },
       }]);
 
-      // Notify technician
+      // Notify assigned technician
       if (ticket.assigned_to) {
         await notifyAndEmail({
           recipientProfileId: ticket.assigned_to,
           eventName: 'Ticket Reopened Notification',
+          customTitle: `Ticket #${ticket.ticket_number} Reopened — Rejected by ${employeeName}`,
+          customMessage: `${employeeName} rejected the resolution for "${ticket.subject}". Reason: "${cleanReason}". Please review and resume work.`,
           templateVars: {
             ticket_number: ticket.ticket_number,
             subject: ticket.subject,
-            technician_name: (ticket.assignee as any)?.full_name || 'Technician',
-            employee_name: ticket.creator?.full_name || 'Employee',
-            rejection_reason: validated.rejection_reason,
+            technician_name: technicianName,
+            employee_name: employeeName,
+            rejection_reason: cleanReason,
             ticket_url: ticketUrl(id as string),
             company_name: 'DeskPulse',
           },
           link: `/tickets/${id}`,
-        });
+        }).catch(err => console.error('[confirmResolution] tech notify error:', err));
+      }
+
+      // Notify all Admins
+      const adminIds = await getAdminProfileIds();
+      for (const adminId of adminIds) {
+        if (adminId === ticket.assigned_to) continue;
+        await notifyAndEmail({
+          recipientProfileId: adminId,
+          eventName: 'Ticket Reopened Notification',
+          customTitle: `[Admin Alert] Ticket #${ticket.ticket_number} Reopened & Rejected by ${employeeName}`,
+          customMessage: `Employee ${employeeName} rejected the resolution for "${ticket.subject}" (Assigned to: ${technicianName}). Reason: "${cleanReason}".`,
+          templateVars: {
+            ticket_number: ticket.ticket_number,
+            subject: ticket.subject,
+            technician_name: 'Admin',
+            employee_name: employeeName,
+            rejection_reason: `${cleanReason} (Assigned Technician: ${technicianName})`,
+            ticket_url: ticketUrl(id as string),
+            company_name: 'DeskPulse',
+          },
+          link: `/tickets/${id}`,
+        }).catch(err => console.error('[confirmResolution] admin notify error:', err));
       }
 
       // Audit
@@ -666,9 +698,10 @@ export const confirmResolution = async (req: Request, res: Response) => {
         action: 'TICKET_RESOLUTION_REJECTED',
         entity_type: 'ticket',
         entity_id: id as string,
-        new_values: { status: 'Reopened', rejection_reason: validated.rejection_reason },
+        new_values: { status: 'Reopened', rejection_reason: cleanReason },
       }]);
 
+      clearAnalyticsCache();
       return res.json({ status: 'success', data: { status: 'Reopened' } });
     }
   } catch (error: any) {

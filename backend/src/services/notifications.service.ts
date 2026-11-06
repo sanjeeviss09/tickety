@@ -1,4 +1,4 @@
-﻿import { supabaseAdmin } from '../config/supabase';
+import { supabaseAdmin } from '../config/supabase';
 import { sendEmail } from './email.service';
 
 export async function createNotification(params: {
@@ -21,8 +21,10 @@ export async function notifyAndEmail(params: {
   link?: string;
   fallbackTitle?: string;
   fallbackMessage?: string;
+  customTitle?: string;
+  customMessage?: string;
 }) {
-  const { recipientProfileId, eventName, templateVars, link, fallbackTitle, fallbackMessage } = params;
+  const { recipientProfileId, eventName, templateVars, link, fallbackTitle, fallbackMessage, customTitle, customMessage } = params;
 
   const { data: recipient } = await supabaseAdmin
     .from('profiles').select('id, full_name, email_address').eq('id', recipientProfileId).single();
@@ -36,25 +38,37 @@ export async function notifyAndEmail(params: {
     .from('email_templates').select('subject_template, body_template, is_active')
     .eq('event_name', eventName).single();
 
-  const notifTitle = template
+  const notifTitle = customTitle || (template
     ? interpolate(template.subject_template, templateVars)
-    : (fallbackTitle || eventName);
-  const notifBody = template
+    : (fallbackTitle || eventName));
+  const notifBody = customMessage || (template
     ? stripHtml(interpolate(template.body_template, templateVars)).slice(0, 250)
-    : (fallbackMessage || '');
+    : (fallbackMessage || ''));
 
   await createNotification({ userId: recipient.id, title: notifTitle, message: notifBody, link });
 
   if (template?.is_active && recipient.email_address) {
-    const subject = interpolate(template.subject_template, templateVars);
+    const subject = customTitle || interpolate(template.subject_template, templateVars);
     const html = interpolate(template.body_template, {
       ...templateVars,
+      technician_name: templateVars.technician_name || recipient.full_name || 'User',
       employee_name: templateVars.employee_name || recipient.full_name || 'User',
     });
     sendEmail({ to: recipient.email_address, subject, html }).catch(err =>
       console.error('[notifications.service] Email error for event', eventName, err)
     );
   }
+}
+
+export async function getAdminProfileIds(): Promise<string[]> {
+  const { data: adminRoles } = await supabaseAdmin.from('roles').select('id').ilike('name', 'admin');
+  const roleIds = (adminRoles ?? []).map((r: any) => r.id);
+  if (roleIds.length === 0) return [];
+  const { data: admins } = await supabaseAdmin
+    .from('profiles')
+    .select('id')
+    .in('role_id', roleIds);
+  return (admins ?? []).map((a: any) => a.id as string);
 }
 
 export async function notifyEscalationRecipients(params: {

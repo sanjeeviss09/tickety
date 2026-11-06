@@ -20,6 +20,7 @@ import {
   useTechnicianStatusOverview,
   useTechnicianPriorityOverview,
   useAwaitingConfirmationTickets,
+  useReopenedTickets,
 } from './hooks/useTechnicianDashboard';
 
 import {
@@ -192,6 +193,11 @@ function WorkloadCard({ title, value, icon, colorClass, bgClass, filterLink, loa
 function TicketRow({ ticket, showEmployee = true, showSla = true, showAccept = false, onAccept }: {
   ticket: any; showEmployee?: boolean; showSla?: boolean; showAccept?: boolean; onAccept?: () => void;
 }) {
+  const latestRejected = Array.isArray(ticket.confirmations)
+    ? [...ticket.confirmations].reverse().find((c: any) => c.status === 'Rejected' && c.rejection_reason)
+    : null;
+  const employeeName = (Array.isArray(ticket.creator) ? ticket.creator[0]?.full_name : ticket.creator?.full_name);
+
   return (
     <div className="flex items-start gap-3 py-3 px-2 -mx-2 hover:bg-muted/40 rounded-md transition-colors group">
       <span className={cn('w-2 h-2 rounded-full mt-2 shrink-0', PRIORITY_CFG[ticket.priority]?.dot ?? 'bg-gray-400')} />
@@ -203,10 +209,15 @@ function TicketRow({ ticket, showEmployee = true, showSla = true, showAccept = f
         <Link to={`/tickets/${ticket.id}`} className="text-sm font-medium line-clamp-1 hover:text-primary transition-colors block">
           {ticket.subject}
         </Link>
-        {showEmployee && ticket.creator?.full_name && (
+        {showEmployee && employeeName && (
           <p className="text-xs text-muted-foreground mt-0.5">
-            {ticket.creator.full_name}
+            {employeeName}
             {ticket.departments?.name && <span> · {ticket.departments.name}</span>}
+          </p>
+        )}
+        {ticket.status === 'Reopened' && latestRejected?.rejection_reason && (
+          <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 mt-1.5 font-medium line-clamp-2">
+            Rejected by employee: "{latestRejected.rejection_reason.trim()}"
           </p>
         )}
       </div>
@@ -269,7 +280,7 @@ function ActiveTicketTable() {
         </div>
         {/* Quick filters */}
         <div className="flex flex-wrap gap-1.5 mt-2">
-          {['All', 'Critical', 'Assigned', 'In Progress', 'Waiting for User', 'Overdue'].map(f => (
+          {['All', 'Reopened', 'Critical', 'Assigned', 'In Progress', 'Waiting for User', 'Overdue'].map(f => (
             <Button
               key={f}
               size="sm"
@@ -458,6 +469,7 @@ export function TechnicianDashboard() {
   const { data: priorityOverview } = useTechnicianPriorityOverview();
 
   const { data: awaitingConfirmations, isLoading: acLoading, error: acError, refetch: refetchAc } = useAwaitingConfirmationTickets();
+  const { data: reopenedTickets } = useReopenedTickets();
 
   // Mutations
   const markRead = useMarkNotificationRead();
@@ -607,16 +619,79 @@ export function TechnicianDashboard() {
         </div>
       </div>
 
+      {/* ── Reopened / Rejected by Employee Alert Banner ───────────────── */}
+      {reopenedTickets && reopenedTickets.length > 0 && (
+        <Card className="border-red-300 shadow-md">
+          <CardHeader className="bg-gradient-to-r from-red-50 to-orange-50 rounded-t-lg border-b border-red-200 pb-4">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div>
+                <CardTitle className="text-red-900 flex items-center gap-2 text-lg">
+                  <AlertCircle className="h-5 w-5 text-red-600" /> Reopened Tickets — Rejected by Employee
+                </CardTitle>
+                <p className="text-sm text-red-700 mt-1">
+                  The employee reported that the following ticket(s) are not resolved. Please review the rejection reason and resume work.
+                </p>
+              </div>
+              <Badge variant="outline" className="bg-white text-red-700 border-red-300 font-bold">
+                {reopenedTickets.length} Action Needed
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y border-t border-red-100">
+              {reopenedTickets.map((ticket: any) => {
+                const latestRejected = Array.isArray(ticket.confirmations)
+                  ? [...ticket.confirmations].reverse().find((c: any) => c.status === 'Rejected' && c.rejection_reason)
+                  : null;
+                const empName = (Array.isArray(ticket.creator) ? ticket.creator[0]?.full_name : ticket.creator?.full_name) || 'Employee';
+                return (
+                  <div key={ticket.id} className="p-4 hover:bg-red-50/40 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="space-y-1.5 flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Link to={`/tickets/${ticket.id}`} className="font-semibold text-base hover:underline text-red-900">
+                          {ticket.ticket_number}: {ticket.subject}
+                        </Link>
+                        <PriorityDot priority={ticket.priority} />
+                        <StatusBadge status={ticket.status} />
+                      </div>
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+                        <span className="flex items-center gap-1">
+                          <User className="h-3.5 w-3.5" /> Rejected by <strong className="text-foreground">{empName}</strong>
+                        </span>
+                        {ticket.reopened_at && (
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3.5 w-3.5" /> Reopened {new Date(ticket.reopened_at).toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+                      {latestRejected?.rejection_reason && (
+                        <div className="text-xs bg-red-50 border border-red-200 text-red-800 rounded-md px-3 py-2 mt-1">
+                          <span className="font-semibold">Employee Reason:</span> "{latestRejected.rejection_reason.trim()}"
+                        </div>
+                      )}
+                    </div>
+                    <Button onClick={() => navigate(`/tickets/${ticket.id}`)} className="bg-red-600 hover:bg-red-700 text-white whitespace-nowrap shrink-0">
+                      View & Resume Work
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* ── Workload Summary Cards ──────────────────────────────────────── */}
       <div>
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">My Workload Summary</h2>
         {dashError ? (
           <ErrorState message={(dashError as Error).message} onRetry={() => refetchDash()} />
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-3">
             <WorkloadCard title="Total Assigned" value={summary?.totalAssigned ?? 0} icon={<Ticket className="h-4 w-4" />} colorClass="text-primary" bgClass="bg-primary/10" filterLink="/tickets?assigned_to=me" loading={dashLoading} />
             <WorkloadCard title="Assigned (New)" value={summary?.unaccepted ?? 0} icon={<Inbox className="h-4 w-4" />} colorClass="text-indigo-600" bgClass="bg-indigo-100" filterLink="/tickets?status=Assigned&assigned_to=me" loading={dashLoading} />
             <WorkloadCard title="In Progress" value={summary?.inProgress ?? 0} icon={<Activity className="h-4 w-4" />} colorClass="text-purple-600" bgClass="bg-purple-100" filterLink="/tickets?status=In+Progress&assigned_to=me" loading={dashLoading} />
+            <WorkloadCard title="Reopened" value={summary?.reopened ?? (reopenedTickets ?? []).length} icon={<RefreshCw className="h-4 w-4" />} colorClass="text-red-600" bgClass="bg-red-100" filterLink="/tickets?status=Reopened&assigned_to=me" loading={dashLoading} />
             <WorkloadCard title="Waiting" value={summary?.waitingForUser ?? 0} icon={<AlertTriangle className="h-4 w-4" />} colorClass="text-yellow-700" bgClass="bg-yellow-100" filterLink="/tickets?status=Waiting+for+User&assigned_to=me" loading={dashLoading} />
             <WorkloadCard title="Resolved Today" value={summary?.resolvedToday ?? 0} icon={<CheckCircle className="h-4 w-4" />} colorClass="text-green-600" bgClass="bg-green-100" loading={dashLoading} />
             <WorkloadCard title="Closed Today" value={summary?.closedToday ?? 0} icon={<CheckCheck className="h-4 w-4" />} colorClass="text-emerald-600" bgClass="bg-emerald-100" loading={dashLoading} />
@@ -632,6 +707,11 @@ export function TechnicianDashboard() {
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" asChild>
             <Link to="/tickets?assigned_to=me"><Eye className="mr-2 h-4 w-4" />My Tickets</Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link to="/tickets?status=Reopened&assigned_to=me">
+              <RefreshCw className="mr-2 h-4 w-4 text-red-600" />Reopened
+            </Link>
           </Button>
           <Button variant="outline" asChild>
             <Link to="/tickets?priority=Critical&assigned_to=me">

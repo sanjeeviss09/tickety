@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { Outlet, Navigate, Link, useLocation } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Outlet, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../lib/api';
+import { supabase } from '../lib/supabase';
 import { 
   LayoutDashboard, Users, 
   Settings, LogOut, Menu, Bell, Search, Ticket, Database,
@@ -31,6 +32,7 @@ export default function DashboardLayout() {
     assets: false
   });
   const location = useLocation();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   // Notifications
@@ -42,7 +44,27 @@ export default function DashboardLayout() {
       return res.data.data;
     },
     enabled: !!session,
+    refetchInterval: 15_000,
   });
+
+  useEffect(() => {
+    const userId = profile?.id;
+    if (!userId) return;
+    const channel = supabase
+      .channel(`header-notifications-${userId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${userId}`,
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ['notifications'] });
+        queryClient.invalidateQueries({ queryKey: ['tech-notifications', userId] });
+        queryClient.invalidateQueries({ queryKey: ['my-notifications'] });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [profile?.id, queryClient]);
 
   const markAsRead = useMutation({
     mutationFn: async (id: string) => await api.patch(`/notifications/${id}/read`),
@@ -333,7 +355,9 @@ export default function DashboardLayout() {
                 <Button variant="ghost" size="icon" className="relative">
                   <Bell className="h-5 w-5" />
                   {unreadCount > 0 && (
-                    <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-destructive animate-pulse"></span>
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-destructive text-white text-[10px] font-bold flex items-center justify-center">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
                   )}
                 </Button>
               </DropdownMenuTrigger>
@@ -352,11 +376,26 @@ export default function DashboardLayout() {
                     <div className="p-4 text-center text-sm text-muted-foreground">No notifications</div>
                   ) : (
                     notifications.map((n: any) => (
-                      <div key={n.id} className={cn("p-3 text-sm border-b last:border-0 hover:bg-muted/50 cursor-default", !n.is_read && "bg-muted/30")}>
-                        <div className="flex justify-between items-start mb-1">
-                          <span className="font-medium">{n.title}</span>
+                      <div
+                        key={n.id}
+                        className={cn("p-3 text-sm border-b last:border-0 hover:bg-muted/50 cursor-pointer", !n.is_read && "bg-blue-50/40")}
+                        onClick={() => {
+                          if (!n.is_read) markAsRead.mutate(n.id);
+                          if (n.link) navigate(n.link);
+                        }}
+                      >
+                        <div className="flex justify-between items-start gap-2 mb-1">
+                          <span className={cn("font-medium leading-snug", !n.is_read && "text-primary font-semibold")}>{n.title}</span>
                           {!n.is_read && (
-                            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground" onClick={() => markAsRead.mutate(n.id)}>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-5 w-5 text-muted-foreground shrink-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                markAsRead.mutate(n.id);
+                              }}
+                            >
                               <Check className="h-3 w-3" />
                             </Button>
                           )}

@@ -16,6 +16,7 @@ export interface TechWorkloadSummary {
   unaccepted: number;
   inProgress: number;
   waitingForUser: number;
+  reopened?: number;
   resolvedToday: number;
   closedToday: number;
   overdue: number;
@@ -42,11 +43,12 @@ export interface TechTrendPoint {
 // ─── Ticket query columns used in all list views ────────────────────────────
 const TICKET_SELECT = `
   id, ticket_number, subject, priority, status, due_date,
-  created_at, updated_at, assigned_at, resolution_date,
+  created_at, updated_at, assigned_at, resolution_date, reopened_at, reopen_count,
   creator:profiles!tickets_created_by_fkey(id, full_name, employee_id, profile_picture_url),
   ticket_categories(name),
   departments(name),
-  units(name)
+  units(name),
+  confirmations:ticket_resolution_confirmations(status, rejection_reason, responded_at)
 `;
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
@@ -136,15 +138,47 @@ export function useTodaysWork() {
         .select(TICKET_SELECT)
         .eq('assigned_to', techId)
         .in('status', activeStatuses)
-        .or(`due_date.lte.${todayEnd},priority.eq.Critical`)
+        .or(`due_date.lte.${todayEnd},priority.eq.Critical,status.eq.Reopened,status.eq.In Progress,status.eq.Assigned`)
         .order('due_date', { ascending: true, nullsFirst: false })
         .limit(20);
+
+      if (error) throw error;
+      const list = data ?? [];
+      // Sort Reopened and Critical tickets to the top
+      return list.sort((a: any, b: any) => {
+        if (a.status === 'Reopened' && b.status !== 'Reopened') return -1;
+        if (b.status === 'Reopened' && a.status !== 'Reopened') return 1;
+        if (a.priority === 'Critical' && b.priority !== 'Critical') return -1;
+        if (b.priority === 'Critical' && a.priority !== 'Critical') return 1;
+        return 0;
+      });
+    },
+    enabled: !!techId,
+    staleTime: 20_000,
+  });
+}
+
+// ─── 3b. Reopened / Rejected Tickets ─────────────────────────────────────────
+export function useReopenedTickets() {
+  const techId = getTechId();
+
+  return useQuery({
+    queryKey: ['tech-reopened-tickets', techId],
+    queryFn: async () => {
+      if (!techId) return [];
+
+      const { data, error } = await supabase
+        .from('tickets')
+        .select(TICKET_SELECT)
+        .eq('assigned_to', techId)
+        .eq('status', 'Reopened')
+        .order('reopened_at', { ascending: false, nullsFirst: false });
 
       if (error) throw error;
       return data ?? [];
     },
     enabled: !!techId,
-    staleTime: 20_000,
+    staleTime: 10_000,
   });
 }
 
@@ -302,6 +336,12 @@ export function useTechnicianNotifications() {
     queryKey: ['tech-notifications', userId],
     queryFn: async () => {
       if (!userId) return [];
+      try {
+        const res = await api.get('/notifications');
+        if (res.data?.data) return (res.data.data as any[]).slice(0, 15);
+      } catch {
+        // fallback to direct supabase query
+      }
       const { data, error } = await supabase
         .from('notifications')
         .select('id, title, message, is_read, link, created_at')
@@ -314,6 +354,7 @@ export function useTechnicianNotifications() {
     },
     enabled: !!userId,
     staleTime: 10_000,
+    refetchInterval: 15_000,
   });
 
   // Realtime subscription
@@ -328,6 +369,7 @@ export function useTechnicianNotifications() {
         filter: `user_id=eq.${userId}`,
       }, () => {
         queryClient.invalidateQueries({ queryKey: ['tech-notifications', userId] });
+        queryClient.invalidateQueries({ queryKey: ['notifications'] });
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -436,11 +478,15 @@ export function useTechnicianTicketsRealtime() {
         queryClient.invalidateQueries({ queryKey: ['tech-dashboard-data'] });
         queryClient.invalidateQueries({ queryKey: ['tech-active-tickets', techId] });
         queryClient.invalidateQueries({ queryKey: ['tech-todays-work', techId] });
+        queryClient.invalidateQueries({ queryKey: ['tech-reopened-tickets', techId] });
         queryClient.invalidateQueries({ queryKey: ['tech-sla-risk', techId] });
         queryClient.invalidateQueries({ queryKey: ['tech-critical', techId] });
         queryClient.invalidateQueries({ queryKey: ['tech-recent-assignments', techId] });
         queryClient.invalidateQueries({ queryKey: ['tech-waiting-for-user', techId] });
         queryClient.invalidateQueries({ queryKey: ['tech-recently-resolved', techId] });
+        queryClient.invalidateQueries({ queryKey: ['tech-awaiting-confirmation', techId] });
+        queryClient.invalidateQueries({ queryKey: ['notifications'] });
+        queryClient.invalidateQueries({ queryKey: ['tech-notifications', techId] });
       })
       .subscribe();
 

@@ -11,6 +11,9 @@ function getCache(key: string) {
 function setCache(key: string, data: any, ttlSeconds = 300) {
   cache.set(key, { data, expiresAt: Date.now() + ttlSeconds * 1000 });
 }
+export function clearAnalyticsCache() {
+  cache.clear();
+}
 
 // ── GET /api/v1/analytics/summary ───────────────────────────
 export const getSummary = async (req: Request, res: Response) => {
@@ -34,6 +37,7 @@ export const getSummary = async (req: Request, res: Response) => {
       totalTickets: tickets?.length || 0,
       openTickets: tickets?.filter(t => t.status === 'Open').length || 0,
       inProgressTickets: tickets?.filter(t => t.status === 'In Progress').length || 0,
+      reopenedTickets: tickets?.filter(t => t.status === 'Reopened').length || 0,
       resolvedTickets: tickets?.filter(t => t.status === 'Resolved').length || 0,
       closedTickets: tickets?.filter(t => t.status === 'Closed').length || 0,
       criticalTickets: tickets?.filter(t => t.priority === 'Critical').length || 0,
@@ -407,6 +411,7 @@ export const getTechnicianDashboard = async (req: Request, res: Response) => {
       unaccepted: tickets?.filter(t => t.status === 'Assigned').length ?? 0,
       inProgress: tickets?.filter(t => t.status === 'In Progress').length ?? 0,
       waitingForUser: tickets?.filter(t => t.status === 'Waiting for User').length ?? 0,
+      reopened: tickets?.filter(t => t.status === 'Reopened').length ?? 0,
       resolvedToday: tickets?.filter(t =>
         t.status === 'Resolved' &&
         t.resolution_date &&

@@ -281,37 +281,37 @@ export function TicketList() {
                 <table className="w-full text-sm text-left">
                   <thead className="text-xs uppercase bg-muted text-muted-foreground border-b">
                     <tr>
-                      <th className="px-3 py-3 font-semibold whitespace-nowrap">Ticket ID</th>
-                      <th className="px-3 py-3 font-semibold">Subject</th>
-                      <th className="px-3 py-3 font-semibold whitespace-nowrap">Status</th>
-                      <th className="px-3 py-3 font-semibold whitespace-nowrap">Priority</th>
-                      <th className="px-3 py-3 font-semibold whitespace-nowrap">SLA</th>
-                      <th className="px-3 py-3 font-semibold hidden xl:table-cell whitespace-nowrap">Category</th>
-                      <th className="px-3 py-3 font-semibold whitespace-nowrap">Assignee</th>
-                      <th className="px-3 py-3 font-semibold hidden lg:table-cell whitespace-nowrap">Updated</th>
-                      <th className="px-3 py-3 font-semibold text-right whitespace-nowrap">Actions</th>
+                      <th className="px-2.5 py-2.5 font-semibold whitespace-nowrap">Ticket ID</th>
+                      <th className="px-2.5 py-2.5 font-semibold">Subject</th>
+                      <th className="px-2.5 py-2.5 font-semibold whitespace-nowrap">Status</th>
+                      <th className="px-2.5 py-2.5 font-semibold whitespace-nowrap">Priority</th>
+                      <th className="px-2.5 py-2.5 font-semibold whitespace-nowrap">SLA</th>
+                      <th className="px-2.5 py-2.5 font-semibold hidden 2xl:table-cell whitespace-nowrap">Category</th>
+                      <th className="px-2.5 py-2.5 font-semibold whitespace-nowrap">Assignee</th>
+                      <th className="px-2.5 py-2.5 font-semibold hidden lg:table-cell whitespace-nowrap">Updated</th>
+                      <th className="px-2.5 py-2.5 font-semibold text-right whitespace-nowrap">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {tickets.map((ticket: any) => (
                       <tr key={ticket.id} className="hover:bg-muted/50 transition-colors group">
-                        <td className="px-3 py-3 font-medium whitespace-nowrap">
+                        <td className="px-2.5 py-2.5 font-medium whitespace-nowrap text-xs">
                           <Link to={`/tickets/${ticket.id}`} className="text-primary hover:underline">
                             {ticket.ticket_number}
                           </Link>
                         </td>
-                        <td className="px-3 py-3">
-                          <div className="truncate font-medium max-w-[160px] lg:max-w-[200px] xl:max-w-[260px]" title={ticket.subject}>
+                        <td className="px-2.5 py-2.5">
+                          <div className="truncate font-medium max-w-[140px] lg:max-w-[180px] xl:max-w-[240px]" title={ticket.subject}>
                             {ticket.subject}
                           </div>
                         </td>
-                        <td className="px-3 py-3 whitespace-nowrap">
+                        <td className="px-2.5 py-2.5 whitespace-nowrap">
                           <StatusBadge status={ticket.status} />
                         </td>
-                        <td className="px-3 py-3 whitespace-nowrap">
+                        <td className="px-2.5 py-2.5 whitespace-nowrap">
                           <PriorityBadge priority={ticket.priority} showIcon={false} />
                         </td>
-                        <td className="px-3 py-3 whitespace-nowrap">
+                        <td className="px-2.5 py-2.5 whitespace-nowrap">
                           <SlaBadge 
                             dueDate={ticket.due_date} 
                             status={ticket.status} 
@@ -320,21 +320,21 @@ export function TicketList() {
                             createdAt={ticket.created_at}
                           />
                         </td>
-                        <td className="px-3 py-3 hidden xl:table-cell text-muted-foreground">
-                          <div className="truncate max-w-[130px]">
+                        <td className="px-2.5 py-2.5 hidden 2xl:table-cell text-muted-foreground text-xs">
+                          <div className="truncate max-w-[120px]">
                             {ticket.ticket_categories?.name || ticket.categories?.name || '-'}
                           </div>
                         </td>
-                        <td className="px-3 py-3 text-muted-foreground">
-                          <div className="truncate max-w-[130px]">
+                        <td className="px-2.5 py-2.5 text-muted-foreground text-xs">
+                          <div className="truncate max-w-[110px]">
                             {Array.isArray(ticket.assignee) ? ticket.assignee[0]?.full_name : ticket.assignee?.full_name || 'Unassigned'}
                           </div>
                         </td>
-                        <td className="px-3 py-3 hidden lg:table-cell whitespace-nowrap text-muted-foreground text-xs">
+                        <td className="px-2.5 py-2.5 hidden lg:table-cell whitespace-nowrap text-muted-foreground text-xs">
                           {new Date(ticket.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                         </td>
-                        <td className="px-3 py-3 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-2">
+                        <td className="px-2.5 py-2.5 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1.5">
                             <Link to={`/tickets/${ticket.id}`} className="text-primary hover:underline text-xs font-medium">
                               View
                             </Link>
@@ -342,7 +342,7 @@ export function TicketList() {
                               <Button 
                                 variant="ghost" 
                                 size="icon"
-                                className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
                                 onClick={(e) => {
                                   e.preventDefault();
                                   e.stopPropagation();
@@ -351,7 +351,7 @@ export function TicketList() {
                                 title="Delete ticket"
                                 aria-label="Delete ticket"
                               >
-                                <Trash2 className="h-4 w-4" />
+                                <Trash2 className="h-3.5 w-3.5" />
                               </Button>
                             )}
                           </div>

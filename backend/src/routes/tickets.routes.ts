@@ -4,7 +4,7 @@ import {
   getTickets, createTicket, getTicketById, 
   updateTicketStatus, assignTicket, addComment, 
   getComments, getTimeline, deleteComment, deleteTicket,
-  getEligibleTechnicians
+  getEligibleTechnicians, linkTicketAsset
 } from '../controllers/tickets.controller';
 import {
   startWork, completeWork, confirmResolution,
@@ -22,6 +22,7 @@ router.get('/:id', getTicketById);
 router.delete('/:id', deleteTicket);
 router.patch('/:id/status', requireRole(['Admin']), updateTicketStatus);
 router.post('/:id/assign', requireRole(['Admin']), assignTicket);
+router.patch('/:id/asset', requireRole(['Admin', 'Technician']), linkTicketAsset);
 router.get('/:id/eligible-technicians', requireRole(['Admin', 'Technician']), getEligibleTechnicians);
 
 router.get('/:id/comments', getComments);

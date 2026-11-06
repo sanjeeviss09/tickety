@@ -343,8 +343,8 @@ export const getTicketById = async (req: Request, res: Response) => {
         departments (name),
         creator:profiles!tickets_created_by_fkey (full_name, email_address, profile_picture_url, employee_id),
         assignee:profiles!tickets_assigned_to_fkey (full_name, email_address, profile_picture_url),
-        assets:asset_ticket_mapping (asset:assets (id, name, asset_code)),
-        related_asset:assets!tickets_related_asset_id_fkey (id, name, asset_code),
+        assets:asset_ticket_mapping (asset:assets (id, name, asset_code, brand, model, serial_number, status, condition, unit, department, location, port_number, purchase_date, category:asset_categories(name), warranty:asset_warranty(warranty_start_date, warranty_end_date, amc_start_date, amc_end_date, provider))),
+        related_asset:assets!tickets_related_asset_id_fkey (id, name, asset_code, brand, model, serial_number, status, condition, unit, department, location, port_number, purchase_date, category:asset_categories(name), warranty:asset_warranty(warranty_start_date, warranty_end_date, amc_start_date, amc_end_date, provider)),
         ticket_self_service_events!tickets_self_service_event_id_fkey (*)
       `)
       .eq('id', id)
@@ -640,6 +640,39 @@ export const getTimeline = async (req: Request, res: Response) => {
 
     if (error) throw error;
     res.json({ status: 'success', data });
+  } catch (error: any) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+};
+
+export const linkTicketAsset = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { asset_id } = req.body;
+    const userId = req.user?.id;
+    const assetId = asset_id && asset_id !== 'none' ? asset_id : null;
+
+    const { error } = await supabaseAdmin.from('tickets').update({ related_asset_id: assetId }).eq('id', id);
+    if (error) throw error;
+
+    // Keep mapping table in sync (single related asset per ticket)
+    await supabaseAdmin.from('asset_ticket_mapping').delete().eq('ticket_id', id);
+    let assetLabel = 'none';
+    if (assetId) {
+      await supabaseAdmin.from('asset_ticket_mapping').insert([{ ticket_id: id, asset_id: assetId, linked_by: userId }]);
+      const { data: a } = await supabaseAdmin.from('assets').select('name, asset_code').eq('id', assetId).single();
+      if (a) assetLabel = `${a.name} (${a.asset_code})`;
+    }
+
+    await supabaseAdmin.from('ticket_timeline').insert([{
+      ticket_id: id,
+      user_id: userId,
+      action_type: 'ASSET_LINKED',
+      message: assetId ? `Linked asset ${assetLabel}` : 'Removed linked asset',
+      metadata: { asset_id: assetId }
+    }]);
+
+    res.json({ status: 'success' });
   } catch (error: any) {
     res.status(500).json({ status: 'error', message: error.message });
   }

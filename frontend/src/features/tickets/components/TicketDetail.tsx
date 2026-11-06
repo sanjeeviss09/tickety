@@ -247,7 +247,7 @@ function AttachmentsPanel({ ticketId, canUpload }: { ticketId: string; canUpload
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
-    try { const r = await api.get(`/tickets/${ticketId}/attachments`); setAtts(r.data.data ?? []); } catch {}
+    try { const r = await api.get(`/tickets/${ticketId}/attachments`); setAtts(r.data.data ?? []); } catch { }
   };
   useEffect(() => { load(); }, [ticketId]);
 
@@ -389,6 +389,96 @@ function ResolutionHistoryPanel({ resolutions, confirmations, isEmployee }: { re
   );
 }
 
+function RelatedAssetCard({ ticket, canEdit, onOpenAsset, onChanged }: {
+  ticket: any; canEdit: boolean; onOpenAsset: (id: string) => void; onChanged: () => void;
+}) {
+  const asset = ticket.related_asset || ticket.assets?.[0]?.asset || null;
+  const [editing, setEditing] = useState(false);
+  const [options, setOptions] = useState<any[]>([]);
+  const [selected, setSelected] = useState<string>(asset?.id || 'none');
+  const [saving, setSaving] = useState(false);
+  const ownerId = ticket.affected_employee_id || ticket.requester_id || ticket.created_by;
+
+  useEffect(() => {
+    if (!editing || !ownerId) return;
+    api.get(`/assets?assigned_to=${ownerId}`)
+      .then(r => setOptions(Array.isArray(r.data?.data) ? r.data.data : []))
+      .catch(() => setOptions([]));
+  }, [editing, ownerId]);
+
+  const save = async () => {
+    setSaving(true);
+    try { await api.patch(`/tickets/${ticket.id}/asset`, { asset_id: selected }); setEditing(false); onChanged(); }
+    catch (err: any) { alert(err.response?.data?.message || 'Failed to update asset'); }
+    finally { setSaving(false); }
+  };
+
+  const w = Array.isArray(asset?.warranty) ? asset.warranty[0] : asset?.warranty;
+  const warrantyEnd = w?.warranty_end_date ? new Date(w.warranty_end_date) : null;
+  const warrantyActive = warrantyEnd ? warrantyEnd >= new Date() : null;
+  const amcEnd = w?.amc_end_date ? new Date(w.amc_end_date) : null;
+  const categoryName = Array.isArray(asset?.category) ? asset.category[0]?.name : asset?.category?.name;
+
+  const Row = ({ label, value }: { label: string; value?: any }) =>
+    value ? <div className="flex justify-between gap-3"><span className="text-muted-foreground">{label}</span><span className="font-medium text-right break-all">{value}</span></div> : null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
+        <CardTitle className="text-sm">Asset Information</CardTitle>
+        {canEdit && !editing && (
+          <Button variant="ghost" size="sm" className="h-6 text-xs px-2" onClick={() => { setSelected(asset?.id || 'none'); setEditing(true); }}>
+            {asset ? 'Change' : 'Link Asset'}
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent className="text-xs space-y-2">
+        {editing ? (
+          <div className="space-y-2">
+            <select className="w-full p-2 border rounded text-xs" value={selected} onChange={e => setSelected(e.target.value)}>
+              <option value="none">No specific asset</option>
+              {options.map((a: any) => <option key={a.id} value={a.id}>{a.name} ({a.asset_code})</option>)}
+            </select>
+            {options.length === 0 && <p className="text-muted-foreground">No assets assigned to this employee.</p>}
+            <div className="flex gap-2">
+              <Button size="sm" className="h-7 text-xs flex-1" onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setEditing(false)} disabled={saving}>Cancel</Button>
+            </div>
+          </div>
+        ) : !asset ? (
+          <p className="text-muted-foreground">No asset linked to this ticket.</p>
+        ) : (
+          <>
+            <button className="font-semibold text-sm text-blue-600 hover:underline text-left" onClick={() => onOpenAsset(asset.id)}>
+              {asset.name} <span className="font-mono text-xs text-muted-foreground">({asset.asset_code})</span>
+            </button>
+            <div className="flex flex-wrap gap-1">
+              {asset.status && <Badge variant="outline" className="text-[10px]">{asset.status}</Badge>}
+              {asset.condition && <Badge variant="outline" className="text-[10px]">{asset.condition}</Badge>}
+              {warrantyActive !== null && (
+                <Badge variant="outline" className={cn('text-[10px]', warrantyActive ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200')}>
+                  {warrantyActive ? 'Under Warranty' : 'Warranty Expired'}
+                </Badge>
+              )}
+            </div>
+            <div className="space-y-1.5 pt-1 border-t">
+              <Row label="Category" value={categoryName} />
+              <Row label="Brand / Model" value={[asset.brand, asset.model].filter(Boolean).join(' ')} />
+              <Row label="Serial No." value={asset.serial_number} />
+              <Row label="Port" value={asset.port_number} />
+              <Row label="Location" value={[asset.unit, asset.department, asset.location].filter(Boolean).join(' · ')} />
+              <Row label="Purchased" value={asset.purchase_date ? new Date(asset.purchase_date).toLocaleDateString() : null} />
+              <Row label="Warranty Until" value={warrantyEnd ? warrantyEnd.toLocaleDateString() : null} />
+              <Row label="AMC Until" value={amcEnd ? amcEnd.toLocaleDateString() : null} />
+              <Row label="Provider" value={w?.provider} />
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function TicketDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -398,7 +488,7 @@ export function TicketDetail() {
   const role = profile?.roles?.name || profile?.roles?.[0]?.name || profile?.role?.name || profile?.role;
 
   const { data, isLoading: loading, error: queryError, refetch: reload } = useTicketDetail(id, role);
-  
+
   const ticket = data?.ticket;
   const comments = data?.comments || [];
   const timeline = data?.timeline || [];
@@ -407,7 +497,7 @@ export function TicketDetail() {
   const unitTechnicians = data?.unitTechnicians || [];
   const sessionData = ticket?.ticket_self_service_events || null;
   const error = queryError ? (queryError as Error).message : '';
-  
+
   const [commentText, setCommentText] = useState('');
   const [isInternal, setIsInternal] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
@@ -433,16 +523,16 @@ export function TicketDetail() {
     finally { setBusy(false); }
   };
 
-  const handleStartWork = () => withBusy(() => api.post(`/tickets/${id}/start-work`).then(() => {}));
+  const handleStartWork = () => withBusy(() => api.post(`/tickets/${id}/start-work`).then(() => { }));
   const handleMarkCompleted = async (form: any) => {
     await withBusy(async () => { await api.post(`/tickets/${id}/complete`, form); setShowResolutionModal(false); });
   };
-  const handleWaitForUser = () => withBusy(() => api.post(`/tickets/${id}/wait-for-user`).then(() => {}));
-  const handleEmployeeReply = (comment: string) => withBusy(() => api.post(`/tickets/${id}/employee-reply`, { comment }).then(() => {}));
+  const handleWaitForUser = () => withBusy(() => api.post(`/tickets/${id}/wait-for-user`).then(() => { }));
+  const handleEmployeeReply = (comment: string) => withBusy(() => api.post(`/tickets/${id}/employee-reply`, { comment }).then(() => { }));
   const handleConfirm = (rating: number, comment: string) =>
-    withBusy(() => api.post(`/tickets/${id}/confirm-resolution`, { confirmed: true, rating, feedback_comment: comment || null }).then(() => {}));
+    withBusy(() => api.post(`/tickets/${id}/confirm-resolution`, { confirmed: true, rating, feedback_comment: comment || null }).then(() => { }));
   const handleReject = (reason: string) =>
-    withBusy(() => api.post(`/tickets/${id}/confirm-resolution`, { confirmed: false, rejection_reason: reason }).then(() => {}));
+    withBusy(() => api.post(`/tickets/${id}/confirm-resolution`, { confirmed: false, rejection_reason: reason }).then(() => { }));
   const handleDeleteTicket = async () => {
     if (!window.confirm('Are you sure you want to delete this ticket? This action cannot be undone.')) return;
     setBusy(true);
@@ -553,7 +643,7 @@ export function TicketDetail() {
       {isEmployee && status === 'Waiting for User' && (
         <Card className="border-2 border-yellow-300 bg-yellow-50">
           <CardHeader>
-            <CardTitle className="text-yellow-900 flex items-center gap-2"><Clock className="h-5 w-5"/> Technician is waiting for your response</CardTitle>
+            <CardTitle className="text-yellow-900 flex items-center gap-2"><Clock className="h-5 w-5" /> Technician is waiting for your response</CardTitle>
             <CardDescription className="text-yellow-800">Please provide the requested information so the technician can continue working on your ticket.</CardDescription>
           </CardHeader>
           <CardContent>
@@ -564,7 +654,7 @@ export function TicketDetail() {
               onChange={(e) => setCommentText(e.target.value)}
             />
             <Button className="mt-3 bg-yellow-600 hover:bg-yellow-700 text-yellow-950 font-medium" disabled={busy || !commentText.trim()} onClick={() => { handleEmployeeReply(commentText); setCommentText(''); }}>
-              {busy ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/>Replying...</> : 'Reply & Resume Work'}
+              {busy ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Replying...</> : 'Reply & Resume Work'}
             </Button>
           </CardContent>
         </Card>
@@ -578,7 +668,7 @@ export function TicketDetail() {
       {isAdminOrTech && !isClosed && workSummary?.slaStatus && <SlaPanel sla={workSummary.slaStatus} ticket={ticket} />}
 
       <div className="flex flex-col lg:grid lg:grid-cols-3 gap-6">
-        
+
         {/* Right Column (Metadata) - Rendered first on mobile */}
         <div className="lg:col-start-3 lg:col-end-4 space-y-4">
           <Card>
@@ -592,9 +682,9 @@ export function TicketDetail() {
                       const s = e.target.value; if (s === status || isUpdatingStatus) return;
                       setIsUpdatingStatus(true);
                       try { await api.patch(`/tickets/${id}/status`, { status: s }); await reload(); }
-                      catch {} finally { setIsUpdatingStatus(false); }
+                      catch { } finally { setIsUpdatingStatus(false); }
                     }}>
-                    {['Open','Assigned','In Progress','Waiting for User','Awaiting Employee Confirmation','Resolved','Closed','Reopened','Cancelled'].map(s => <option key={s} value={s}>{s}</option>)}
+                    {['Open', 'Assigned', 'In Progress', 'Waiting for User', 'Awaiting Employee Confirmation', 'Resolved', 'Closed', 'Reopened', 'Cancelled'].map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 ) : <StatusBadge status={status} />}
               </div>
@@ -602,15 +692,10 @@ export function TicketDetail() {
               <div><span className="text-muted-foreground block mb-1">Category</span><span className="font-medium">{ticket.ticket_categories?.name || 'N/A'}</span></div>
               {ticket.units?.name && <div><span className="text-muted-foreground block mb-1">Unit</span><span className="font-medium">{ticket.units.name}</span></div>}
               {ticket.departments?.name && <div><span className="text-muted-foreground block mb-1">Department</span><span className="font-medium">{ticket.departments.name}</span></div>}
-              {ticket.assets?.length > 0 && (
-                <div><span className="text-muted-foreground block mb-1">Related Asset</span>
-                  <button className="font-medium text-blue-600 hover:underline" onClick={() => navigate(`/assets/${ticket.assets[0].asset.id}`)}>{ticket.assets[0].asset.name} ({ticket.assets[0].asset.asset_code})</button>
-                </div>
-              )}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-muted-foreground">Assignee</span>
-                  {isAdmin && <Button variant="ghost" size="sm" className="h-5 text-xs px-1" onClick={async () => { try { await api.post(`/tickets/${id}/assign`, { assigned_to: profile?.id }); await reload(); } catch {} }}>Assign to Me</Button>}
+                  {isAdmin && <Button variant="ghost" size="sm" className="h-5 text-xs px-1" onClick={async () => { try { await api.post(`/tickets/${id}/assign`, { assigned_to: profile?.id }); await reload(); } catch { } }}>Assign to Me</Button>}
                 </div>
                 {isAdmin ? (
                   <select className="w-full p-2 border rounded text-sm font-medium" value={ticket.assigned_to || ''} disabled={isUpdatingStatus}
@@ -618,7 +703,7 @@ export function TicketDetail() {
                       const v = e.target.value || null; if (v === (ticket.assigned_to || null) || isUpdatingStatus) return;
                       setIsUpdatingStatus(true);
                       try { await api.post(`/tickets/${id}/assign`, { assigned_to: v }); await reload(); }
-                      catch {} finally { setIsUpdatingStatus(false); }
+                      catch { } finally { setIsUpdatingStatus(false); }
                     }}>
                     <option value="">Unassigned</option>
                     {unitTechnicians.map((t: any) => <option key={t.id} value={t.id}>{t.full_name}</option>)}
@@ -640,6 +725,12 @@ export function TicketDetail() {
               )}
             </CardContent>
           </Card>
+          <RelatedAssetCard
+            ticket={ticket}
+            canEdit={(isAdmin || isAssignedTech) && !isClosed}
+            onOpenAsset={(assetId) => navigate(`/assets/${assetId}`)}
+            onChanged={() => reload()}
+          />
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-sm">Submitted By</CardTitle></CardHeader>
             <CardContent className="text-sm">
@@ -699,7 +790,7 @@ export function TicketDetail() {
                 const clean = timeline.filter((e: any, i: number, a: any[]) => {
                   if (e.metadata?.old_status === e.metadata?.new_status) return false;
                   if (e.message?.match(/Status changed from (.*) to \1/i)) return false;
-                  if (i > 0) { const p = a[i-1]; if (p.message === e.message && p.user_id === e.user_id && Math.abs(new Date(e.created_at).getTime() - new Date(p.created_at).getTime()) < 15000) return false; }
+                  if (i > 0) { const p = a[i - 1]; if (p.message === e.message && p.user_id === e.user_id && Math.abs(new Date(e.created_at).getTime() - new Date(p.created_at).getTime()) < 15000) return false; }
                   return true;
                 });
                 if (!clean.length) return <p className="text-sm text-muted-foreground text-center py-4">No activity yet.</p>;
@@ -736,7 +827,7 @@ export function TicketDetail() {
                           <span className="text-xs text-muted-foreground">{new Date(c.created_at).toLocaleString()}</span>
                           {(c.author_id === profile?.id || isAdmin) && (
                             <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={async () => {
-                              try { await api.delete(`/tickets/${id}/comments/${c.id}`); await reload(); } catch {}
+                              try { await api.delete(`/tickets/${id}/comments/${c.id}`); await reload(); } catch { }
                             }}><Trash2 className="h-4 w-4" /></Button>
                           )}
                         </div>
@@ -760,7 +851,7 @@ export function TicketDetail() {
                       if (!commentText.trim() || isPostingComment) return;
                       setIsPostingComment(true);
                       try { await api.post(`/tickets/${id}/comments`, { content: commentText, is_internal: isInternal }); setCommentText(''); await reload(); }
-                      catch {} finally { setIsPostingComment(false); }
+                      catch { } finally { setIsPostingComment(false); }
                     }}>
                       {isPostingComment ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Posting...</> : 'Post Comment'}
                     </Button>

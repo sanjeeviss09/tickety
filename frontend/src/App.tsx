@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuthStore } from './store/authStore';
 import { Loader2 } from 'lucide-react';
+import { Analytics } from '@vercel/analytics/react';
 
 // Layouts and Core Views (Synchronous for fast initial paint)
 import AuthLayout from './layouts/AuthLayout';
@@ -176,6 +177,7 @@ function App() {
           </Routes>
         </Suspense>
       </BrowserRouter>
+      <Analytics />
     </QueryClientProvider>
     </ErrorBoundary>
   );

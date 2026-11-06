@@ -6,7 +6,8 @@ import {
   createEmployee, 
   updateEmployee, 
   deleteEmployee,
-  bulkImportEmployees 
+  bulkImportEmployees,
+  resetEmployeePassword,
 } from '../controllers/employees.controller';
 import { getRoles } from '../controllers/users.controller';
 
@@ -21,6 +22,7 @@ router.get('/:id', getEmployeeById);
 // Admin and Technician routes
 router.post('/', requireRole(['Admin', 'Technician']), createEmployee);
 router.put('/:id', requireRole(['Admin', 'Technician']), updateEmployee);
+router.post('/:id/reset-password', requireRole(['Admin']), resetEmployeePassword);
 router.delete('/:id', requireRole(['Admin', 'Technician']), deleteEmployee);
 router.post('/bulk-import', requireRole(['Admin', 'Technician']), bulkImportEmployees);
 

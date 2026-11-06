@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { supabase } from '@/lib/supabase';
-import { Loader2, Search, Edit, ShieldAlert, Trash2 } from 'lucide-react';
+import { Loader2, Search, Edit, ShieldAlert, Trash2, KeyRound, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { format } from 'date-fns';
 
 export function UsersAccessSettings() {
@@ -21,6 +21,10 @@ export function UsersAccessSettings() {
   
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [passwordStatusMsg, setPasswordStatusMsg] = useState<string | null>(null);
+  const [passwordErrorMsg, setPasswordErrorMsg] = useState<string | null>(null);
 
   const { data: users, isLoading } = useQuery({
     queryKey: ['users'],
@@ -92,6 +96,51 @@ export function UsersAccessSettings() {
     }
   });
 
+  const resetPasswordMutation = useMutation({
+    mutationFn: async ({ user, customPassword }: { user: any; customPassword?: string }) => {
+      setPasswordStatusMsg(null);
+      setPasswordErrorMsg(null);
+      const trimmedPassword = customPassword?.trim();
+
+      try {
+        const res = await api.post(`/employees/${user.id}/reset-password`, {
+          new_password: trimmedPassword || undefined,
+        });
+        return res.data;
+      } catch (err: any) {
+        // Fallback if backend route is still deploying: use /auth/first-login + clear last_login
+        if (user.employee_id) {
+          const tempOrCustom = trimmedPassword || `Reset_${Date.now()}_${Math.random().toString(36).slice(2)}Aa1!`;
+          await api.post('/auth/first-login', {
+            employee_id: user.employee_id,
+            password: tempOrCustom,
+          });
+          if (!trimmedPassword) {
+            await supabase.from('profiles').update({ last_login: null }).eq('id', user.id);
+          }
+          return {
+            status: 'success',
+            message: trimmedPassword
+              ? `New password set for ${user.full_name} (${user.employee_id}).`
+              : `Password reset for ${user.full_name} (${user.employee_id}). The user will be prompted to set a new password on their next login.`,
+          };
+        }
+        throw err;
+      }
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      setNewPasswordInput('');
+      setPasswordStatusMsg(
+        data?.message || 'Password reset successfully. The user will be prompted to set a new password on next login.'
+      );
+    },
+    onError: (err: any) => {
+      setPasswordErrorMsg(err.response?.data?.message || err.message || 'Failed to reset password');
+    },
+  });
+
   const handleEditClick = (user: any) => {
     setSelectedUser({
       ...user,
@@ -99,6 +148,10 @@ export function UsersAccessSettings() {
       role_id: user.role_id || user.role?.id || '',
       employment_status: user.employment_status || 'Active'
     });
+    setNewPasswordInput('');
+    setShowNewPassword(false);
+    setPasswordStatusMsg(null);
+    setPasswordErrorMsg(null);
     setIsEditModalOpen(true);
   };
 
@@ -284,6 +337,94 @@ export function UsersAccessSettings() {
                 <p>This user will be unable to log into DeskPulse while their status is {selectedUser?.employment_status}. Active sessions will not be immediately terminated unless forced.</p>
               </div>
             )}
+
+            {/* Password Reset Section */}
+            <div className="border-t pt-4 mt-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="flex items-center gap-1.5 text-sm font-semibold">
+                    <KeyRound className="h-4 w-4 text-primary" /> Password Reset
+                  </Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Reset this user's password so they are prompted to create a new password on their next login, or set one directly below.
+                  </p>
+                </div>
+              </div>
+
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full justify-center gap-2 border-amber-300 bg-amber-50/60 hover:bg-amber-100/70 text-amber-900 font-medium"
+                disabled={resetPasswordMutation.isPending}
+                onClick={() => {
+                  if (!selectedUser) return;
+                  resetPasswordMutation.mutate({ user: selectedUser });
+                }}
+              >
+                {resetPasswordMutation.isPending && !newPasswordInput.trim() ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <KeyRound className="h-4 w-4 text-amber-700" />
+                )}
+                Reset Password (User Sets New Password on Login)
+              </Button>
+
+              <div className="space-y-1.5 pt-1">
+                <Label className="text-xs text-muted-foreground">Or set a new password directly (min 5 characters)</Label>
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Input
+                      type={showNewPassword ? 'text' : 'password'}
+                      placeholder="Enter new password for user..."
+                      value={newPasswordInput}
+                      onChange={(e) => setNewPasswordInput(e.target.value)}
+                      className="pr-9 h-9 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword((v) => !v)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      tabIndex={-1}
+                    >
+                      {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-9 shrink-0"
+                    disabled={resetPasswordMutation.isPending || newPasswordInput.trim().length < 5}
+                    onClick={() => {
+                      if (!selectedUser || newPasswordInput.trim().length < 5) return;
+                      resetPasswordMutation.mutate({
+                        user: selectedUser,
+                        customPassword: newPasswordInput.trim(),
+                      });
+                    }}
+                  >
+                    {resetPasswordMutation.isPending && newPasswordInput.trim().length >= 5 ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      'Set Password'
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {passwordStatusMsg && (
+                <div className="p-2.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-start gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <span>{passwordStatusMsg}</span>
+                </div>
+              )}
+
+              {passwordErrorMsg && (
+                <div className="p-2.5 rounded-md bg-red-50 border border-red-200 text-red-700 text-xs">
+                  {passwordErrorMsg}
+                </div>
+              )}
+            </div>
           </div>
 
           <DialogFooter>

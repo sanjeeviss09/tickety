@@ -144,7 +144,7 @@ export const updateEmployee = async (req: Request, res: Response) => {
       designation: true, unit_id: true, department_id: true,
       location: true, joining_date: true, employment_status: true,
       reporting_manager_id: true, profile_picture_url: true,
-      role_id: true, is_active: true,
+      role_id: true, is_active: true, last_login: true,
     };
     const safePayload: Record<string, any> = {};
     for (const [k, v] of Object.entries(payload)) {
@@ -225,6 +225,101 @@ export const deleteEmployee = async (req: Request, res: Response) => {
     res.json({ status: 'success', message: 'Employee deleted successfully' });
   } catch (error: any) {
     res.status(500).json({ status: 'error', message: error.message });
+  }
+};
+
+export const resetEmployeePassword = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { new_password } = req.body || {};
+    const adminUserId = (req as any).user?.id;
+
+    const { data: profile, error: profErr } = await supabaseAdmin
+      .from('profiles')
+      .select('id, auth_user_id, employee_id, full_name, email_address')
+      .or(`id.eq.${id},employee_id.eq.${id}`)
+      .maybeSingle();
+
+    if (profErr || !profile) {
+      return res.status(404).json({ status: 'error', message: 'User profile not found' });
+    }
+
+    const empIdUpper = String(profile.employee_id || '').toUpperCase();
+    const internalEmail = `${empIdUpper.toLowerCase()}@deskpulse.internal`;
+
+    const { data: listData } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
+    const allUsers = listData?.users || [];
+    const matchingAuthUser = allUsers.find(
+      (u) =>
+        u.id === profile.id ||
+        (profile.auth_user_id && u.id === profile.auth_user_id) ||
+        u.email?.toLowerCase() === internalEmail.toLowerCase() ||
+        (profile.email_address && u.email?.toLowerCase() === profile.email_address.toLowerCase())
+    );
+
+    const hasExplicitPassword = typeof new_password === 'string' && new_password.trim().length >= 5;
+    const targetPassword = hasExplicitPassword
+      ? new_password.trim()
+      : `Reset_${Date.now()}_${Math.random().toString(36).slice(2)}Aa1!`;
+
+    if (matchingAuthUser) {
+      const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(
+        matchingAuthUser.id,
+        {
+          password: targetPassword,
+          email_confirm: true,
+          user_metadata: {
+            ...(matchingAuthUser.user_metadata || {}),
+            full_name: profile.full_name,
+            employee_id: profile.employee_id,
+            password_reset_required: !hasExplicitPassword,
+            password_reset_at: new Date().toISOString(),
+          },
+        }
+      );
+      if (updateErr) throw updateErr;
+    } else {
+      const { error: createErr } = await supabaseAdmin.auth.admin.createUser({
+        email: profile.email_address || internalEmail,
+        password: targetPassword,
+        email_confirm: true,
+        user_metadata: {
+          full_name: profile.full_name,
+          employee_id: profile.employee_id,
+          password_reset_required: !hasExplicitPassword,
+          password_reset_at: new Date().toISOString(),
+        },
+      });
+      if (createErr) throw createErr;
+    }
+
+    // Mark last_login as null when resetting for user self-setup so LoginForm prompts them to set a new password
+    if (!hasExplicitPassword) {
+      await supabaseAdmin
+        .from('profiles')
+        .update({ last_login: null })
+        .eq('id', profile.id);
+    }
+
+    try {
+      await supabaseAdmin.from('audit_logs').insert([{
+        user_id: adminUserId,
+        action: 'RESET_USER_PASSWORD',
+        entity_type: 'PROFILE',
+        entity_id: profile.id,
+        new_values: { mode: hasExplicitPassword ? 'direct_set' : 'user_prompt_on_login' },
+      }]);
+    } catch {}
+
+    return res.json({
+      status: 'success',
+      message: hasExplicitPassword
+        ? `New password set for ${profile.full_name} (${profile.employee_id}).`
+        : `Password reset for ${profile.full_name} (${profile.employee_id}). The user will be prompted to set a new password on their next login.`,
+    });
+  } catch (error: any) {
+    console.error('[resetEmployeePassword] Error:', error);
+    return res.status(500).json({ status: 'error', message: error.message || 'Failed to reset password' });
   }
 };
 

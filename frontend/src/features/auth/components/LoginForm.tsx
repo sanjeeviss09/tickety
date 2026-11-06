@@ -26,6 +26,23 @@ export function LoginForm() {
   const [success, setSuccess] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isFirstLogin, setIsFirstLogin] = useState(false);
+  const [isPasswordReset, setIsPasswordReset] = useState(false);
+
+  const checkEmployeeResetStatus = async (empId: string): Promise<boolean> => {
+    const clean = empId?.trim();
+    if (!clean) return false;
+    try {
+      const res = await api.get(`/auth/check-user/${encodeURIComponent(clean)}`);
+      if (res.data?.data?.password_reset_required) {
+        setIsFirstLogin(true);
+        setIsPasswordReset(true);
+        setError(null);
+        setSuccess('Your password has been reset. Please enter a new password below to sign in.');
+        return true;
+      }
+    } catch {}
+    return false;
+  };
 
   const handleForgotPassword = async () => {
     const employee_id = form.getValues('employee_id');
@@ -39,28 +56,17 @@ export function LoginForm() {
     setSuccess(null);
 
     try {
-      const email = `${employee_id.toLowerCase()}@deskpulse.internal`;
-      let targetEmail = email;
-      
-      try {
-        const profileRes = await api.get(`/employees`);
-        const matchedEmp = profileRes.data.data?.find(
-          (e: any) => e.employee_id?.toUpperCase() === employee_id.toUpperCase()
-        );
-        if (matchedEmp?.email_address) {
-          targetEmail = matchedEmp.email_address;
-        }
-      } catch {}
+      const resetMode = await checkEmployeeResetStatus(employee_id);
+      if (resetMode) {
+        return;
+      }
 
-      const { error } = await supabase.auth.resetPasswordForEmail(targetEmail, {
-        redirectTo: window.location.origin + '/update-password',
-      });
-
-      if (error) throw error;
-
-      setSuccess('Password reset link sent to your email.');
+      // Switch directly to new password setup mode for internal accounts
+      setIsFirstLogin(true);
+      setIsPasswordReset(true);
+      setSuccess('Enter your new password below and click "Set New Password & Login".');
     } catch (err: any) {
-      setError(err.message || 'Failed to send reset email.');
+      setError(err.message || 'Failed to initiate password reset.');
     } finally {
       setIsLoading(false);
     }
@@ -125,7 +131,12 @@ export function LoginForm() {
 
         if (signInError) {
           if (signInError.message.includes('Invalid login credentials')) {
-            throw new Error('Invalid credentials. If this is your first time logging in, please click "First time login? Set up your password."');
+            const wasReset = await checkEmployeeResetStatus(values.employee_id);
+            if (wasReset) {
+              form.setValue('password', '');
+              return;
+            }
+            throw new Error('Invalid credentials. If this is your first time logging in or your password was reset, please click "First time login / Reset? Set up your password."');
           }
           throw signInError;
         }
@@ -169,10 +180,12 @@ export function LoginForm() {
   return (
     <Card className="w-full">
       <CardHeader>
-        <CardTitle className="text-2xl font-bold">{isFirstLogin ? 'Setup Account' : 'Sign In'}</CardTitle>
+        <CardTitle className="text-2xl font-bold">
+          {isFirstLogin ? (isPasswordReset ? 'Set New Password' : 'Setup Account') : 'Sign In'}
+        </CardTitle>
         <CardDescription>
           {isFirstLogin 
-            ? 'Enter your Employee ID and create a new password.'
+            ? 'Enter your Employee ID and create a new password to sign in.'
             : 'Enter your Employee ID and password to access your account.'}
         </CardDescription>
       </CardHeader>
@@ -186,7 +199,16 @@ export function LoginForm() {
                 <FormItem>
                   <FormLabel>Employee ID</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g. AXX09" {...field} />
+                    <Input
+                      placeholder="e.g. AXX09"
+                      {...field}
+                      onBlur={(e) => {
+                        field.onBlur();
+                        if (!isFirstLogin && e.target.value?.trim()) {
+                          checkEmployeeResetStatus(e.target.value);
+                        }
+                      }}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -199,7 +221,7 @@ export function LoginForm() {
                 <FormItem>
                   <FormLabel>{isFirstLogin ? 'New Password' : 'Password'}</FormLabel>
                   <FormControl>
-                    <Input placeholder="••••••••" type="password" {...field} />
+                    <Input placeholder={isFirstLogin ? 'Enter new password (min 5 chars)' : '••••••••'} type="password" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -211,11 +233,13 @@ export function LoginForm() {
             )}
             
             {success && (
-              <div className="text-sm font-medium text-green-600">{success}</div>
+              <div className="text-sm font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md p-2.5">{success}</div>
             )}
 
             <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? (isFirstLogin ? 'Setting up...' : 'Signing in...') : (isFirstLogin ? 'Set Password & Login' : 'Sign In')}
+              {isLoading
+                ? (isFirstLogin ? 'Setting password...' : 'Signing in...')
+                : (isFirstLogin ? (isPasswordReset ? 'Set New Password & Login' : 'Set Password & Login') : 'Sign In')}
             </Button>
             
             <div className="flex flex-col space-y-2 text-center mt-4">
@@ -224,11 +248,12 @@ export function LoginForm() {
                 variant="link" 
                 onClick={() => {
                   setIsFirstLogin(!isFirstLogin);
+                  setIsPasswordReset(false);
                   setError(null);
                   setSuccess(null);
                 }}
               >
-                {isFirstLogin ? 'Already have a password? Sign in here.' : 'First time login? Set up your password.'}
+                {isFirstLogin ? 'Already have a password? Sign in here.' : 'First time login / Password reset? Set new password.'}
               </Button>
               
               {!isFirstLogin && (

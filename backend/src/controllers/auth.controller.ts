@@ -41,7 +41,16 @@ export const firstLogin = async (req: Request, res: Response) => {
     if (matchingAuthUser) {
       const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(
         matchingAuthUser.id,
-        { password: password, email_confirm: true }
+        {
+          password: password,
+          email_confirm: true,
+          user_metadata: {
+            ...(matchingAuthUser.user_metadata || {}),
+            full_name: profile.full_name,
+            employee_id: profile.employee_id,
+            password_reset_required: false,
+          },
+        }
       );
 
       if (updateErr) {
@@ -54,7 +63,8 @@ export const firstLogin = async (req: Request, res: Response) => {
         .from('profiles')
         .update({ 
           id: matchingAuthUser.id, 
-          email_address: matchingAuthUser.email || internalEmail 
+          email_address: matchingAuthUser.email || internalEmail,
+          last_login: new Date().toISOString(),
         })
         .eq('employee_id', empIdUpper);
 
@@ -149,5 +159,52 @@ export const firstLogin = async (req: Request, res: Response) => {
     const msg = error?.message || 'Server error';
     console.error('First login error:', error);
     res.status(500).json({ status: 'error', message: msg });
+  }
+};
+
+export const checkUserAuthStatus = async (req: Request, res: Response) => {
+  try {
+    const rawEmpId = String(req.params.employeeId || '').trim();
+    if (!rawEmpId) {
+      return res.status(400).json({ status: 'error', message: 'Employee ID is required' });
+    }
+    const empIdUpper = rawEmpId.toUpperCase();
+    const internalEmail = `${empIdUpper.toLowerCase()}@deskpulse.internal`;
+
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('id, employee_id, full_name, email_address, last_login, employment_status')
+      .ilike('employee_id', empIdUpper)
+      .maybeSingle();
+
+    if (!profile) {
+      return res.status(404).json({ status: 'error', message: 'Employee ID not found' });
+    }
+
+    const { data: listData } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
+    const allUsers = listData?.users || [];
+    const matchingAuthUser = allUsers.find(
+      (u) =>
+        u.id === profile.id ||
+        u.email?.toLowerCase() === internalEmail.toLowerCase() ||
+        (profile.email_address && u.email?.toLowerCase() === profile.email_address.toLowerCase())
+    );
+
+    const resetRequired = Boolean(
+      !matchingAuthUser ||
+      matchingAuthUser.user_metadata?.password_reset_required === true ||
+      !profile.last_login
+    );
+
+    return res.json({
+      status: 'success',
+      data: {
+        employee_id: profile.employee_id,
+        full_name: profile.full_name,
+        password_reset_required: resetRequired,
+      },
+    });
+  } catch (error: any) {
+    return res.status(500).json({ status: 'error', message: error.message });
   }
 };

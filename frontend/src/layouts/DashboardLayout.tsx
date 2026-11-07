@@ -445,8 +445,8 @@ export default function DashboardLayout() {
         </header>
 
         {/* Main scrollable area */}
-        <main className="flex-1 overflow-y-auto no-scrollbar bg-muted/20 p-3 sm:p-4 lg:p-6 flex flex-col min-h-0">
-          <div className="mx-auto max-w-7xl w-full flex-1 flex flex-col min-h-0">
+        <main className="flex-1 overflow-y-auto bg-muted/20 p-3 sm:p-4 lg:p-6 flex flex-col min-h-0">
+          <div className="mx-auto max-w-7xl w-full flex-1 flex flex-col">
             <Outlet />
           </div>
         </main>

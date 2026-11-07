@@ -81,7 +81,7 @@ export function TicketList() {
   const hasActiveFilters = searchTerm !== '' || statusFilter !== 'All' || priorityFilter !== 'All' || slaFilter !== 'All';
 
   return (
-    <div className="space-y-6 max-w-full overflow-hidden">
+    <div className="space-y-6 max-w-full">
       {/* ── Page Header ── */}
       <div className="flex flex-wrap sm:flex-nowrap justify-between items-center gap-4">
         <div>
@@ -277,19 +277,19 @@ export function TicketList() {
           ) : (
             <div className="w-full mt-4 sm:mt-0 space-y-4">
               {/* ── Desktop Data Table (hidden on mobile) ── */}
-              <div className="hidden md:block rounded-md border overflow-x-auto bg-card shadow-sm">
-                <table className="w-full text-sm text-left">
-                  <thead className="text-xs uppercase bg-muted text-muted-foreground border-b">
-                    <tr>
-                      <th className="px-2.5 py-2.5 font-semibold whitespace-nowrap">Ticket ID</th>
-                      <th className="px-2.5 py-2.5 font-semibold">Subject</th>
-                      <th className="px-2.5 py-2.5 font-semibold whitespace-nowrap">Status</th>
-                      <th className="px-2.5 py-2.5 font-semibold whitespace-nowrap">Priority</th>
-                      <th className="px-2.5 py-2.5 font-semibold whitespace-nowrap">SLA</th>
-                      <th className="px-2.5 py-2.5 font-semibold hidden 2xl:table-cell whitespace-nowrap">Category</th>
-                      <th className="px-2.5 py-2.5 font-semibold whitespace-nowrap">Assignee</th>
-                      <th className="px-2.5 py-2.5 font-semibold hidden lg:table-cell whitespace-nowrap">Updated</th>
-                      <th className="px-2.5 py-2.5 font-semibold text-right whitespace-nowrap">Actions</th>
+              <div className="hidden md:block rounded-md border overflow-x-auto overflow-y-auto max-h-[calc(100vh-270px)] min-h-[320px] bg-card shadow-sm">
+                <table className="w-full text-sm text-left border-collapse">
+                  <thead className="text-xs uppercase bg-muted text-muted-foreground border-b sticky top-0 z-10 shadow-xs">
+                    <tr className="bg-muted">
+                      <th className="px-2.5 py-2.5 font-semibold whitespace-nowrap bg-muted">Ticket ID</th>
+                      <th className="px-2.5 py-2.5 font-semibold bg-muted">Subject</th>
+                      <th className="px-2.5 py-2.5 font-semibold whitespace-nowrap bg-muted">Status</th>
+                      <th className="px-2.5 py-2.5 font-semibold whitespace-nowrap bg-muted">Priority</th>
+                      <th className="px-2.5 py-2.5 font-semibold whitespace-nowrap bg-muted">SLA</th>
+                      <th className="px-2.5 py-2.5 font-semibold hidden 2xl:table-cell whitespace-nowrap bg-muted">Category</th>
+                      <th className="px-2.5 py-2.5 font-semibold whitespace-nowrap bg-muted">Assignee</th>
+                      <th className="px-2.5 py-2.5 font-semibold hidden lg:table-cell whitespace-nowrap bg-muted">Updated</th>
+                      <th className="px-2.5 py-2.5 font-semibold text-right whitespace-nowrap bg-muted">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">

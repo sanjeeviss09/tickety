@@ -87,43 +87,34 @@ input[type="number"] {
   appearance: textfield;
 }
 
-/* Invisible scrolling: hide scrollbars globally while keeping full scroll functionality */
-html,
-body,
-#root,
-div,
-main,
-section,
-article,
-aside,
-nav,
-* {
-  scrollbar-width: none !important; /* Firefox and modern Chromium */
-  -ms-overflow-style: none !important; /* IE and legacy Edge */
-}
-
+/* Sleek, modern custom scrollbars for comfortable scrolling */
 ::-webkit-scrollbar {
-  display: none !important;
-  width: 0px !important;
-  height: 0px !important;
-  background: transparent !important;
-}
-
-::-webkit-scrollbar-thumb {
-  display: none !important;
-  background: transparent !important;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  display: none !important;
-  background: transparent !important;
+  background: transparent;
 }
 
-::-webkit-scrollbar-corner {
-  display: none !important;
-  background: transparent !important;
+::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.25);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
+::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.45);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+}
+
+/* Specific elements that intentionally opt out of visible scrollbars */
 .no-scrollbar::-webkit-scrollbar {
   display: none !important;
   width: 0 !important;
